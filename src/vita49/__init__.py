@@ -5,6 +5,7 @@ from .packet import (
     TSI,
     TSF,
     ClassID,
+    CIF0Fields,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "TSI",
     "TSF",
     "ClassID",
+    "CIF0Fields",
 ]
