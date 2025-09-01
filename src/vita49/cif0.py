@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
+from enum import IntEnum
 
 from .core import _payload_bytes_to_words, _payload_words_to_bytes, _u32
 
@@ -11,23 +12,33 @@ from .core import _payload_bytes_to_words, _payload_words_to_bytes, _u32
 # ---------------------------------------------
 
 
-class _PackingMethod:
+class PackingMethod(IntEnum):
     PROCESSING_EFFICIENT = 0
     LINK_EFFICIENT = 1
 
 
-class _SampleType:
+class SampleType(IntEnum):
     REAL = 0
     COMPLEX_CARTESIAN = 1  # I/Q
     COMPLEX_POLAR = 2
 
 
+class DataItemFormat(IntEnum):
+    # 00000: Signed fixed-point (two's-complement), normalized [-1, 1-2^-(N-1)]
+    SIGNED_FIXED_POINT = 0b00000
+    IEEE754_SINGLE = 0b01110  # 32-bit float
+    IEEE754_DOUBLE = 0b01111  # 64-bit float (double)
+    # 10000: Unsigned fixed-point, normalized [0, 1-2^-N]
+    UNSIGNED_FIXED_POINT = 0b10000
+
 @dataclass
 class PayloadFormat:
     # Word 1 fields (bit positions per spec)
-    packing_method: int  # 0=processing-efficient, 1=link-efficient
-    sample_type: int  # 0=real, 1=complex cartesian, 2=complex polar
+    packing_method: PackingMethod  # 0=processing-efficient, 1=link-efficient
+    sample_type: SampleType  # 0=real, 1=complex cartesian, 2=complex polar
+    # Data item format: both raw 5-bit code and optional enum
     data_item_format_code: int  # 5-bit code (0..31)
+    data_item_format: Optional["DataItemFormat"] = None
     sample_component_repeat: bool  # if True, components repeat (I,I,... then Q,Q,...)
     event_tag_size_bits: int  # 0..7
     channel_tag_size_bits: int  # 0..15
@@ -44,9 +55,14 @@ class PayloadFormat:
         w0 &= 0xFFFFFFFF
         w1 &= 0xFFFFFFFF
 
-        packing_method = (w0 >> 31) & 0x1
-        sample_type = (w0 >> 29) & 0x3
+        packing_method = PackingMethod((w0 >> 31) & 0x1)
+        sample_type = SampleType((w0 >> 29) & 0x3)
         data_item_format_code = (w0 >> 24) & 0x1F
+        # Try to map to enum; keep None if unknown
+        try:
+            data_item_format = DataItemFormat(data_item_format_code)
+        except ValueError:
+            raise ValueError(f"Unsuppported DataItemFormat code: {data_item_format_code}")
         sample_component_repeat = bool((w0 >> 23) & 0x1)
         event_tag_size_bits = (w0 >> 20) & 0x7
         channel_tag_size_bits = (w0 >> 16) & 0xF
@@ -61,6 +77,7 @@ class PayloadFormat:
             packing_method=packing_method,
             sample_type=sample_type,
             data_item_format_code=data_item_format_code,
+            data_item_format=data_item_format,
             sample_component_repeat=sample_component_repeat,
             event_tag_size_bits=event_tag_size_bits,
             channel_tag_size_bits=channel_tag_size_bits,
@@ -74,9 +91,12 @@ class PayloadFormat:
     def pack_words(self) -> Tuple[int, int]:
         # Encode back to two 32-bit words
         w0 = 0
-        w0 |= (self.packing_method & 0x1) << 31
-        w0 |= (self.sample_type & 0x3) << 29
-        w0 |= (self.data_item_format_code & 0x1F) << 24
+        w0 |= (int(self.packing_method) & 0x1) << 31
+        w0 |= (int(self.sample_type) & 0x3) << 29
+        code = self.data_item_format_code
+        if self.data_item_format is not None:
+            code = int(self.data_item_format) & 0x1F
+        w0 |= (code & 0x1F) << 24
         w0 |= (1 if self.sample_component_repeat else 0) << 23
         w0 |= (self.event_tag_size_bits & 0x7) << 20
         w0 |= (self.channel_tag_size_bits & 0xF) << 16
@@ -382,4 +402,12 @@ class CIF0Fields:
         return f, idx * 4
 
 
-__all__ = ["CIF0Fields", "PayloadFormat"]
+
+
+__all__ = [
+    "CIF0Fields",
+    "PayloadFormat",
+    "PackingMethod",
+    "SampleType",
+    "DataItemFormat",
+]
