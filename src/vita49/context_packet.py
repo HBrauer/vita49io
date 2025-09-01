@@ -62,7 +62,7 @@ class ContextPacket:
         # Payload and CIF0 summary
         parts.append(f"payload_len={len(self.payload)}")
         if self.cif0 is not None:
-            parts.append("cif0=True")
+            parts.append(f"cif0={self.cif0}")
         if self.cif1 is not None:
             parts.append("cif1=True")
         if self.trailer is not None:
@@ -112,21 +112,34 @@ class ContextPacket:
         if header.packet_type is not PacketType.CONTEXT_PACKET:
             raise ValueError("Not a Context packet type")
 
-        payload = _payload_words_to_bytes(words[idx:end_idx])
+        # Work with payload as words directly to avoid redundant conversions.
+        p_words = words[idx:end_idx]
         trailer = common.trailer
 
-        # Best-effort parse of CIF0 (and CIF1 if enabled). Always preserve
-        # the original payload; parsed structures are attached for convenience.
+        # Best-effort parse of CIF0/CIF1 in the order:
+        # CIF0 word, CIF1 word (if enabled), CIF0 fields, CIF1 fields.
+        # Always preserve the original payload; attach parsed structures.
         parsed_cif0: Optional[CIF0Fields] = None
         parsed_cif1: Optional[CIF1Fields] = None
 
-        parsed_cif0, used0 = CIF0Fields.parse(payload)
-        # Only attempt CIF1 if CIF0 explicitly enables it
-        if parsed_cif0.cif1_enable:
-            parsed_cif1, _used1 = CIF1Fields.parse(payload[used0:])
+        
+        cif0_mask = p_words[0]
+        w_idx = 1
+        cif1_mask: Optional[int] = None
+        if (cif0_mask & (1 << 1)) != 0:
+            cif1_mask = p_words[w_idx]
+            w_idx += 1
+
+        # Parse CIF0 fields from remaining words
+        parsed_cif0, used_field_words0 = CIF0Fields.parse_from_mask(cif0_mask, p_words[w_idx:])
+        w_fields_idx = w_idx + used_field_words0
 
 
 
+
+
+        # Convert payload words to bytes once for storage
+        payload = _payload_words_to_bytes(p_words)
         return ContextPacket(
             packet_type=header.packet_type,
             stream_id=common.stream_id,

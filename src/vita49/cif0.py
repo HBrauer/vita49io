@@ -69,8 +69,8 @@ class PayloadFormat:
         item_packing_field_size_bits = ((w0 >> 6) & 0x3F) + 1  # stored as value-1
         data_item_size_bits = (w0 & 0x3F) + 1  # stored as value-1
 
-        repeat_count = ((w1 >> 16) & 0xFFFF) + 1  # stored as value-1
-        vector_size = (w1 & 0xFFFF) + 1  # stored as value-1
+        repeat_count = ((w1 >> 16) & 0xFFFF) 
+        vector_size = (w1 & 0xFFFF) 
 
         return PayloadFormat(
             packing_method=packing_method,
@@ -104,8 +104,8 @@ class PayloadFormat:
         w0 |= (max(1, self.data_item_size_bits) - 1) & 0x3F
 
         w1 = 0
-        w1 |= ((max(1, self.repeat_count) - 1) & 0xFFFF) << 16
-        w1 |= (max(1, self.vector_size) - 1) & 0xFFFF
+        w1 |= ((max(1, self.repeat_count)) & 0xFFFF) << 16
+        w1 |= (max(1, self.vector_size) ) & 0xFFFF
 
         return _u32(w0), _u32(w1)
 
@@ -160,7 +160,7 @@ def _from_s16_fixed7(w: int) -> float:
 @dataclass
 class CIF0Fields:
     # Bit 31
-    context_field_change_indicator: Optional[int] = None  # 32-bit mask/value
+    context_field_change_indicator: bool = False  
     # Bit 30
     reference_point_identifier: Optional[int] = None  # 32-bit SID
     # Bits 29..25 (2 words each, s64 fp20)
@@ -197,7 +197,7 @@ class CIF0Fields:
 
     def _presence_mask(self) -> int:
         m = 0
-        if self.context_field_change_indicator is not None:
+        if self.context_field_change_indicator:
             m |= 1 << 31
         if self.reference_point_identifier is not None:
             m |= 1 << 30
@@ -240,8 +240,6 @@ class CIF0Fields:
         words.append(self._presence_mask() & 0xFFFFFFFF)
 
         # Emit fields in descending bit order, 31 -> 15
-        if self.context_field_change_indicator is not None:
-            words.append(_u32(self.context_field_change_indicator))
         if self.reference_point_identifier is not None:
             words.append(_u32(self.reference_point_identifier))
         if self.bandwidth_hz is not None:
@@ -296,81 +294,79 @@ class CIF0Fields:
         return _payload_words_to_bytes(words)
 
     @staticmethod
-    def parse(payload: bytes) -> Tuple["CIF0Fields", int]:
-        """Parse CIF0 payload. Returns (cif0, bytes_consumed).
+    def parse_from_mask(mask: int, field_words: List[int]) -> Tuple["CIF0Fields", int]:
+        """Parse CIF0 fields given a known presence mask and subsequent words.
 
-        Expects fields to be encoded in descending bit order (31 -> 15).
+        Returns (cif0, words_consumed_for_fields). Does not include the mask word.
         """
-        words = _payload_bytes_to_words(payload)
-        if not words:
-            raise ValueError("Empty payload for CIF0")
-        mask = words[0]
+
         # Reject unsupported lower bits explicitly requested by caller
         unsupported_bits = [14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 0]
         bad = [b for b in unsupported_bits if (mask >> b) & 1]
         if bad:
             raise ValueError(
-                f"Unsupported CIF0 fields present (presence bits set): {bad}"
+                f"Unsupported CIF0 fields present (presence bits set): {bad} {bin(mask)}"
             )
-        idx = 1
+
+        idx = 0
 
         def need(n: int):
             nonlocal idx
-            if idx + n > len(words):
+            if idx + n > len(field_words):
                 raise ValueError("Truncated CIF0 payload")
 
         f = CIF0Fields()
+        print(f"mask: {bin(mask)}")
 
-        if mask & (1 << 31):
-            need(1)
-            f.context_field_change_indicator = words[idx]
-            idx += 1
+
+        f.context_field_change_indicator = bool(mask & (1 << 31))
         if mask & (1 << 30):
             need(1)
-            f.reference_point_identifier = words[idx]
+            f.reference_point_identifier = field_words[idx]
+            print(f'Reference point: {hex(f.reference_point_identifier)}')
             idx += 1
         if mask & (1 << 29):
             need(2)
-            f.bandwidth_hz = _from_s64_fixed20(words[idx], words[idx + 1])
+            f.bandwidth_hz = _from_s64_fixed20(field_words[idx], field_words[idx + 1])
             idx += 2
         if mask & (1 << 28):
             need(2)
-            f.if_reference_frequency_hz = _from_s64_fixed20(words[idx], words[idx + 1])
+            f.if_reference_frequency_hz = _from_s64_fixed20(field_words[idx], field_words[idx + 1])
             idx += 2
         if mask & (1 << 27):
             need(2)
-            f.rf_reference_frequency_hz = _from_s64_fixed20(words[idx], words[idx + 1])
+            f.rf_reference_frequency_hz = _from_s64_fixed20(field_words[idx], field_words[idx + 1])
             idx += 2
         if mask & (1 << 26):
             need(2)
-            f.rf_reference_frequency_offset_hz = _from_s64_fixed20(words[idx], words[idx + 1])
+            f.rf_reference_frequency_offset_hz = _from_s64_fixed20(field_words[idx], field_words[idx + 1])
             idx += 2
         if mask & (1 << 25):
             need(2)
-            f.if_band_offset_hz = _from_s64_fixed20(words[idx], words[idx + 1])
+            f.if_band_offset_hz = _from_s64_fixed20(field_words[idx], field_words[idx + 1])
             idx += 2
         if mask & (1 << 24):
             need(1)
-            f.reference_level_dbm = _from_s16_fixed7(words[idx] & 0xFFFF)
+            f.reference_level_dbm = _from_s16_fixed7(field_words[idx] & 0xFFFF)
             idx += 1
         if mask & (1 << 23):
             need(1)
-            w = words[idx]
+            w = field_words[idx]
             a = _from_s16_fixed7((w >> 16) & 0xFFFF)
             b = _from_s16_fixed7(w & 0xFFFF)
             f.gain_db = (a, b)
             idx += 1
         if mask & (1 << 22):
             need(1)
-            f.over_range_count = words[idx] & 0xFFFFFFFF
+            f.over_range_count = field_words[idx] & 0xFFFFFFFF
             idx += 1
         if mask & (1 << 21):
             need(2)
-            f.sample_rate_hz = _from_u64_fixed20(words[idx], words[idx + 1])
+            f.sample_rate_hz = _from_u64_fixed20(field_words[idx], field_words[idx + 1])
             idx += 2
         if mask & (1 << 20):
             need(2)
-            hi, lo = words[idx], words[idx + 1]
+            hi, lo = field_words[idx], field_words[idx + 1]
             i = ((hi & 0xFFFFFFFF) << 32) | (lo & 0xFFFFFFFF)
             if i & (1 << 63):
                 i -= 1 << 64
@@ -378,29 +374,29 @@ class CIF0Fields:
             idx += 2
         if mask & (1 << 19):
             need(1)
-            f.timestamp_calibration_time_s = words[idx] & 0xFFFFFFFF
+            f.timestamp_calibration_time_s = field_words[idx] & 0xFFFFFFFF
             idx += 1
         if mask & (1 << 18):
             need(1)
-            w = words[idx]
+            w = field_words[idx]
             if w & 0x80000000:
                 w = (w - 0x100000000)  # s32
             f.temperature_c = w
             idx += 1
         if mask & (1 << 17):
             need(2)
-            oui = words[idx] & 0xFFFFFF
-            dev = words[idx + 1] & 0xFFFFFFFF
+            oui = field_words[idx] & 0xFFFFFF
+            dev = field_words[idx + 1] & 0xFFFFFFFF
             f.device_identifier = (oui, dev)
             idx += 2
         if mask & (1 << 16):
             need(1)
-            f.state_event_indicators = words[idx] & 0xFFFFFFFF
+            f.state_event_indicators = field_words[idx] & 0xFFFFFFFF
             idx += 1
         if mask & (1 << 15):
             need(2)
-            w0 = words[idx] & 0xFFFFFFFF
-            w1 = words[idx + 1] & 0xFFFFFFFF
+            w0 = field_words[idx] & 0xFFFFFFFF
+            w1 = field_words[idx + 1] & 0xFFFFFFFF
             f.data_packet_payload_format = (w0, w1)
             # Also provide a decoded, user-friendly view
             try:
@@ -412,8 +408,20 @@ class CIF0Fields:
         if mask & (1 << 1):
             f.cif1_enable = True
 
-        # Return bytes consumed (words*4)
-        return f, idx * 4
+        return f, idx
+
+    def parse(payload: bytes) -> Tuple["CIF0Fields", int]:
+        """Parse CIF0 payload. Returns (cif0, bytes_consumed).
+
+        Expects fields to be encoded in descending bit order (31 -> 15).
+        """
+        words = _payload_bytes_to_words(payload)
+        if not words:
+            raise ValueError("Empty payload for CIF0")
+        mask = words[0]
+        f, used_field_words = CIF0Fields.parse_from_mask(mask, words[1:])
+        # Return bytes consumed including the mask word
+        return f, (1 + used_field_words) * 4
 
 
 

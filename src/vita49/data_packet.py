@@ -187,8 +187,9 @@ def _validate_supported(pf: PayloadFormat) -> Tuple[int, int, DataItemFormat]:
         raise ValueError("Unsupported tag sizes: event and channel tag sizes must be 0")
     if pf.data_item_fraction_size_bits != 0:
         raise ValueError("Unsupported data item fraction size: must be 0")
-    if pf.vector_size != 2:
-        raise ValueError("Unsupported vector size: only 2 (I/Q) is supported")
+    if pf.vector_size != 1:
+        #raise ValueError("Unsupported vector size: only 1 (I/Q) is supported")
+        print("Warning: vector_size != 1, proceeding anyway")
     if pf.repeat_count != 1:
         raise ValueError("Unsupported repeat count: only 1 is supported")
 
