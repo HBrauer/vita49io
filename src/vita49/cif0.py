@@ -192,6 +192,8 @@ class CIF0Fields:
     # Decoded helper (not part of on-wire format). If provided when packing
     # and raw tuple is None, it will be used to generate the two words.
     payload_format: Optional[PayloadFormat] = None
+    # Bit 1 (no additional words): CIF 1 Enable (flag)
+    cif1_enable: Optional[bool] = None
 
     def _presence_mask(self) -> int:
         m = 0
@@ -229,6 +231,8 @@ class CIF0Fields:
             m |= 1 << 16
         if self.data_packet_payload_format is not None:
             m |= 1 << 15
+        if self.cif1_enable:
+            m |= 1 << 1
         return m
 
     def pack(self) -> bytes:
@@ -287,6 +291,7 @@ class CIF0Fields:
             else:
                 w0, w1 = self.payload_format.pack_words()  # type: ignore[union-attr]
             words.extend([_u32(w0), _u32(w1)])
+        # Bit 1 (CIF 1 Enable) adds no additional words
 
         return _payload_words_to_bytes(words)
 
@@ -300,6 +305,13 @@ class CIF0Fields:
         if not words:
             raise ValueError("Empty payload for CIF0")
         mask = words[0]
+        # Reject unsupported lower bits explicitly requested by caller
+        unsupported_bits = [14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 0]
+        bad = [b for b in unsupported_bits if (mask >> b) & 1]
+        if bad:
+            raise ValueError(
+                f"Unsupported CIF0 fields present (presence bits set): {bad}"
+            )
         idx = 1
 
         def need(n: int):
@@ -396,6 +408,9 @@ class CIF0Fields:
             except Exception:
                 f.payload_format = None
             idx += 2
+        # Bit 1: CIF 1 Enable (flag only)
+        if mask & (1 << 1):
+            f.cif1_enable = True
 
         # Return bytes consumed (words*4)
         return f, idx * 4

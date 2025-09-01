@@ -127,6 +127,7 @@ def _pack_common_prefix(c: _Common) -> List[int]:
     if c.header.packet_type in (
         PacketType.IF_DATA_WITH_STREAM_ID,
         PacketType.EXTENSION_DATA_WITH_STREAM_ID,
+        PacketType.CONTEXT_PACKET,  # Context packet requires Stream ID in this model
     ):
         if c.stream_id is None:
             raise ValueError("Packet type requires a Stream ID, but none provided")
@@ -183,7 +184,11 @@ def _parse_common_from_words(words: List[int]) -> tuple[_Common, int, int]:
     fractional_seconds: Optional[int] = None
 
     # Stream ID presence is determined by packet type (with/without) in this model
-    if pkt_type in (PacketType.IF_DATA_WITH_STREAM_ID, PacketType.EXTENSION_DATA_WITH_STREAM_ID):
+    if pkt_type in (
+        PacketType.IF_DATA_WITH_STREAM_ID,
+        PacketType.EXTENSION_DATA_WITH_STREAM_ID,
+        PacketType.CONTEXT_PACKET,  # Context packet requires Stream ID in this model
+    ):
         if idx >= len(words):
             raise ValueError("Truncated after header: missing Stream ID")
         stream_id = words[idx]

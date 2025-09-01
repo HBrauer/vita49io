@@ -67,6 +67,8 @@ class ContextPacket:
     def pack(self) -> bytes:
         if self.packet_type is not PacketType.CONTEXT_PACKET:
             raise ValueError("ContextPacket must have CONTEXT_PACKET packet_type")
+        if self.stream_id is None:
+            raise ValueError("ContextPacket requires a Stream ID")
 
         # Build common prefix via _Common helper (stream_id ignored for context)
         common = _Common(
@@ -109,7 +111,7 @@ class ContextPacket:
 
         return ContextPacket(
             packet_type=header.packet_type,
-            stream_id=None,
+            stream_id=common.stream_id,
             class_id=common.class_id,
             tsi=header.tsi,
             tsf=header.tsf,

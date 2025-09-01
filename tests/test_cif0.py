@@ -18,7 +18,7 @@ class TestCIF0(unittest.TestCase):
 
         p = ContextPacket(
             packet_type=PacketType.CONTEXT_PACKET,
-            stream_id=None,
+            stream_id=0xABCDEF01,
             class_id=None,
             tsi=TSI.UTC,
             tsf=TSF.FRACTIONAL,
@@ -46,4 +46,3 @@ class TestCIF0(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
