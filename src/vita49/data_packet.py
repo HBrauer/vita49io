@@ -35,6 +35,48 @@ class DataPacket:
     # compatible payload_format.
     iq: Optional["np.ndarray"] = None
 
+    def __repr__(self) -> str:  # pragma: no cover - human-facing formatting
+        def _hex32(v: int) -> str:
+            return f"0x{v & 0xFFFFFFFF:08X}"
+
+        parts: List[str] = []
+        parts.append(f"packet_type={self.packet_type.name}")
+        if self.stream_id is not None:
+            parts.append(f"stream_id={_hex32(self.stream_id)}")
+        if self.class_id is not None:
+            oui, ic, pc = self.class_id
+            parts.append(
+                f"class_id=(0x{oui & 0xFFFFFF:06X}, 0x{ic & 0xFFFF:04X}, 0x{pc & 0xFFFF:04X})"
+            )
+        if self.tsi != TSI.NONE:
+            parts.append(f"tsi={self.tsi.name}")
+        if self.tsf != TSF.NONE:
+            parts.append(f"tsf={self.tsf.name}")
+        if self.integer_seconds is not None:
+            parts.append(f"integer_seconds={self.integer_seconds}")
+        if self.fractional_seconds is not None:
+            parts.append(f"fractional_seconds={_hex32(self.fractional_seconds)}")
+        # Keep payload concise; show length only
+        parts.append(f"payload_len={len(self.payload)}")
+        if self.trailer is not None:
+            parts.append(f"trailer={_hex32(self.trailer)}")
+        # Show packet count always for debugging sequences
+        parts.append(f"packet_count={self.packet_count}")
+        # If IQ present, summarize size without importing numpy
+        if self.iq is not None:
+            n = None
+            try:
+                n = int(getattr(self.iq, "size", None))
+            except Exception:
+                pass
+            if n is None:
+                try:
+                    n = len(self.iq)  # type: ignore[arg-type]
+                except Exception:
+                    n = 0
+            parts.append(f"iq_len={n}")
+        return f"DataPacket({', '.join(parts)})"
+
     def pack(self, payload_format: Optional[PayloadFormat] = None) -> bytes:
         if self.packet_type not in (
             PacketType.IF_DATA_WITHOUT_STREAM_ID,

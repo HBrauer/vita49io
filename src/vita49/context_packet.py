@@ -34,6 +34,35 @@ class ContextPacket:
     trailer: Optional[int] = None
     packet_count: int = 0
 
+    def __repr__(self) -> str:  # pragma: no cover - human-facing formatting
+        def _hex32(v: int) -> str:
+            return f"0x{v & 0xFFFFFFFF:08X}"
+
+        parts = [f"packet_type={self.packet_type.name}"]
+        if self.stream_id is not None:
+            parts.append(f"stream_id={_hex32(self.stream_id)}")
+        if self.class_id is not None:
+            oui, ic, pc = self.class_id
+            parts.append(
+                f"class_id=(0x{oui & 0xFFFFFF:06X}, 0x{ic & 0xFFFF:04X}, 0x{pc & 0xFFFF:04X})"
+            )
+        if self.tsi != TSI.NONE:
+            parts.append(f"tsi={self.tsi.name}")
+        if self.tsf != TSF.NONE:
+            parts.append(f"tsf={self.tsf.name}")
+        if self.integer_seconds is not None:
+            parts.append(f"integer_seconds={self.integer_seconds}")
+        if self.fractional_seconds is not None:
+            parts.append(f"fractional_seconds={_hex32(self.fractional_seconds)}")
+        # Payload and CIF0 summary
+        parts.append(f"payload_len={len(self.payload)}")
+        if self.cif0 is not None:
+            parts.append("cif0=True")
+        if self.trailer is not None:
+            parts.append(f"trailer={_hex32(self.trailer)}")
+        parts.append(f"packet_count={self.packet_count}")
+        return f"ContextPacket({', '.join(parts)})"
+
     def pack(self) -> bytes:
         if self.packet_type is not PacketType.CONTEXT_PACKET:
             raise ValueError("ContextPacket must have CONTEXT_PACKET packet_type")
@@ -80,4 +109,3 @@ class ContextPacket:
         )
 
 __all__ = ["ContextPacket"]
-
