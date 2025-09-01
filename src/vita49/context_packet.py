@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .cif0 import CIF0Fields
+from .cif1 import CIF1Fields
 from .core import (
     Header,
     _Common,
@@ -32,6 +33,9 @@ class ContextPacket:
     # Optional structured CIF0. If provided when packing, it takes precedence
     # over the raw `payload` field and will be encoded as the payload.
     cif0: Optional[CIF0Fields] = None
+    # Optional parsed CIF1 (same format as CIF0). Values are currently ignored
+    # by the library; this is provided to indicate presence and raw capture.
+    cif1: Optional[CIF1Fields] = None
     trailer: Optional[int] = None
     packet_count: int = 0
 
@@ -59,6 +63,8 @@ class ContextPacket:
         parts.append(f"payload_len={len(self.payload)}")
         if self.cif0 is not None:
             parts.append("cif0=True")
+        if self.cif1 is not None:
+            parts.append("cif1=True")
         if self.trailer is not None:
             parts.append(f"trailer={_hex32(self.trailer)}")
         parts.append(f"packet_count={self.packet_count}")
@@ -109,6 +115,18 @@ class ContextPacket:
         payload = _payload_words_to_bytes(words[idx:end_idx])
         trailer = common.trailer
 
+        # Best-effort parse of CIF0 (and CIF1 if enabled). Always preserve
+        # the original payload; parsed structures are attached for convenience.
+        parsed_cif0: Optional[CIF0Fields] = None
+        parsed_cif1: Optional[CIF1Fields] = None
+
+        parsed_cif0, used0 = CIF0Fields.parse(payload)
+        # Only attempt CIF1 if CIF0 explicitly enables it
+        if parsed_cif0.cif1_enable:
+            parsed_cif1, _used1 = CIF1Fields.parse(payload[used0:])
+
+
+
         return ContextPacket(
             packet_type=header.packet_type,
             stream_id=common.stream_id,
@@ -118,7 +136,8 @@ class ContextPacket:
             integer_seconds=common.integer_seconds,
             fractional_seconds=common.fractional_seconds,
             payload=payload,
-            cif0=None,
+            cif0=parsed_cif0,
+            cif1=parsed_cif1,
             trailer=trailer,
             packet_count=header.packet_count,
         )

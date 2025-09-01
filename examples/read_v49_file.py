@@ -25,7 +25,7 @@ def read_all_packets(path: str):
     from vita49.enums import PacketType
     from vita49.data_packet import DataPacket
     from vita49.context_packet import ContextPacket
-    from vita49.cif0 import CIF0Fields, PayloadFormat
+    from vita49.cif0 import PayloadFormat
 
     last_payload_format: Optional[PayloadFormat] = None
 
@@ -56,15 +56,10 @@ def read_all_packets(path: str):
 
             if header.packet_type == PacketType.CONTEXT_PACKET:
                 pkt = ContextPacket.parse(packet_bytes)
-                # Try to parse CIF0 payload and remember payload format
-                try:
-                    cif0, used = CIF0Fields.parse(pkt.payload)
-                    pkt.cif0 = cif0
-                    if cif0.payload_format is not None:
-                        last_payload_format = cif0.payload_format
-                except Exception:
-                    # Not a CIF0 payload (or parse failed); keep last_payload_format unchanged
-                    pass
+                # If ContextPacket already parsed CIF0, reuse it to update
+                # the last known payload format for subsequent data packets.
+                if pkt.cif0 is not None and pkt.cif0.payload_format is not None:
+                    last_payload_format = pkt.cif0.payload_format
                 yield pkt
             elif header.packet_type in (
                 PacketType.IF_DATA_WITHOUT_STREAM_ID,
