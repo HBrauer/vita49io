@@ -37,7 +37,6 @@ class PayloadFormat:
     sample_type: SampleType  # 0=real, 1=complex cartesian, 2=complex polar
     # Data item format: both raw 5-bit code and optional enum
     data_item_format_code: int  # 5-bit code (0..31)
-    data_item_format: Optional["DataItemFormat"] = None
     sample_component_repeat: bool  # if True, components repeat (I,I,... then Q,Q,...)
     event_tag_size_bits: int  # 0..7
     channel_tag_size_bits: int  # 0..15
@@ -48,6 +47,7 @@ class PayloadFormat:
     # Word 2 fields
     repeat_count: int  # decoded (1..65536)
     vector_size: int  # decoded (1..65536)
+    data_item_format: Optional["DataItemFormat"] = None
 
     @staticmethod
     def parse(w0: int, w1: int) -> "PayloadFormat":

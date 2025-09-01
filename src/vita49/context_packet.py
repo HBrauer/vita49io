@@ -13,7 +13,7 @@ from .core import (
     _u32,
 )
 from .enums import PacketType, TSI, TSF
-from .types import ClassID
+from .vrt_types import ClassID
 
 
 @dataclass
@@ -155,3 +155,5 @@ class ContextPacket:
         )
 
 __all__ = ["ContextPacket"]
+
+

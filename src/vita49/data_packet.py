@@ -12,7 +12,7 @@ from .core import (
     _u32,
 )
 from .enums import PacketType, TSI, TSF
-from .types import ClassID
+from .vrt_types import ClassID
 from .cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
 
 
@@ -369,3 +369,5 @@ def _encode_iq_payload(iq: "np.ndarray", pf: PayloadFormat) -> bytes:
     # di in (16, 24) packed into lower bits of 32-bit field
     fields32 = (uvals & ((1 << di) - 1)).astype(np.uint32)
     return fields32.astype(">u4").tobytes()
+
+

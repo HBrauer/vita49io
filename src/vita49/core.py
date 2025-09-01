@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from .enums import PacketType, TSI, TSF
-from .types import ClassID
+from .vrt_types import ClassID
 
 
 # Header bit masks (based on common VITA 49.0 usage)
@@ -243,3 +243,4 @@ __all__ = [
     "_finalize_words_to_bytes",
     "_parse_common_from_words",
 ]
+
