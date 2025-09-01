@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple, List
 
 from .core import (
     _Common,
@@ -15,6 +15,7 @@ from .core import (
 )
 from .enums import PacketType, TSI, TSF
 from .types import ClassID
+from .cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
 
 
 @dataclass
@@ -29,8 +30,12 @@ class DataPacket:
     payload: bytes = b""
     trailer: Optional[int] = None
     packet_count: int = 0
+    # Optional decoded IQ samples (complex64) when a compatible PayloadFormat
+    # is provided to parse(). Not serialized unless pack() is called with a
+    # compatible payload_format.
+    iq: Optional["np.ndarray"] = None
 
-    def pack(self) -> bytes:
+    def pack(self, payload_format: Optional[PayloadFormat] = None) -> bytes:
         if self.packet_type not in (
             PacketType.IF_DATA_WITHOUT_STREAM_ID,
             PacketType.IF_DATA_WITH_STREAM_ID,
@@ -65,13 +70,22 @@ class DataPacket:
             packet_count=self.packet_count,
         )
         words = _pack_common_prefix(common)
-        words.extend(_payload_bytes_to_words(self.payload))
+
+        # If IQ samples are provided and a payload_format is given, encode IQ
+        # into payload bytes according to the supported subset. Otherwise use
+        # raw payload bytes as-is for backward compatibility.
+        if self.iq is not None and payload_format is not None:
+            payload_bytes = _encode_iq_payload(self.iq, payload_format)
+        else:
+            payload_bytes = self.payload
+
+        words.extend(_payload_bytes_to_words(payload_bytes))
         if self.trailer is not None:
             words.append(_u32(self.trailer))
         return _finalize_words_to_bytes(words)
 
     @staticmethod
-    def parse(data: bytes) -> "DataPacket":
+    def parse(data: bytes, payload_format: Optional[PayloadFormat] = None) -> "DataPacket":
         if len(data) < 4 or len(data) % 4 != 0:
             raise ValueError("Invalid VRT packet length")
         words = [_unpack_u32_be(data[i : i + 4]) for i in range(0, len(data), 4)]
@@ -84,6 +98,11 @@ class DataPacket:
         ):
             raise ValueError("Not a Data packet type")
         payload = _payload_words_to_bytes(words[idx:end_idx])
+
+        iq = None
+        if payload_format is not None:
+            iq = _decode_iq_payload(payload, payload_format)
+
         return DataPacket(
             packet_type=common.packet_type,
             stream_id=common.stream_id,
@@ -95,7 +114,153 @@ class DataPacket:
             payload=payload,
             trailer=common.trailer,
             packet_count=common.packet_count,
+            iq=iq,
         )
 
 __all__ = ["DataPacket"]
 
+
+# --------------------------
+# Internal helpers (IQ I/O)
+# --------------------------
+
+def _validate_supported(pf: PayloadFormat) -> Tuple[int, int, DataItemFormat]:
+    if pf.packing_method != PackingMethod.PROCESSING_EFFICIENT:
+        raise ValueError("Unsupported packing method: only Processing-efficient is supported")
+    if pf.sample_type != SampleType.COMPLEX_CARTESIAN:
+        raise ValueError("Unsupported sample type: only Complex Cartesian (I/Q) is supported")
+    if pf.sample_component_repeat:
+        raise ValueError("Unsupported sample-component repeat: must be false")
+    if pf.event_tag_size_bits != 0 or pf.channel_tag_size_bits != 0:
+        raise ValueError("Unsupported tag sizes: event and channel tag sizes must be 0")
+    if pf.data_item_fraction_size_bits != 0:
+        raise ValueError("Unsupported data item fraction size: must be 0")
+    if pf.vector_size != 2:
+        raise ValueError("Unsupported vector size: only 2 (I/Q) is supported")
+    if pf.repeat_count != 1:
+        raise ValueError("Unsupported repeat count: only 1 is supported")
+
+    try:
+        fmt = DataItemFormat(pf.data_item_format_code)
+    except ValueError as e:
+        raise ValueError(f"Unsupported data item format code: {pf.data_item_format_code}") from e
+
+    # Validate combinations
+    ipf = pf.item_packing_field_size_bits
+    di = pf.data_item_size_bits
+
+    valid = False
+    if fmt in (DataItemFormat.SIGNED_FIXED_POINT, DataItemFormat.UNSIGNED_FIXED_POINT):
+        if (ipf == 16 and di == 16) or (
+            ipf == 32 and di in (16, 24, 32)
+        ):
+            valid = True
+    elif fmt == DataItemFormat.IEEE754_SINGLE:
+        if ipf == 32 and di == 32:
+            valid = True
+
+    if not valid:
+        raise ValueError(
+            f"Unsupported item packing/data size combination: item_packing={ipf}, data_item={di}, format={fmt.name}"
+        )
+
+    return ipf, di, fmt
+
+
+def _decode_iq_payload(payload: bytes, pf: PayloadFormat):
+    import numpy as np  # lazy import to avoid hard dependency when unused
+
+    ipf, di, fmt = _validate_supported(pf)
+
+    # Field extraction according to packing field size
+    if ipf == 16:
+        # Big-endian 16-bit fields
+        fields = np.frombuffer(payload, dtype=">u2")  # type: ignore[arg-type]
+        uvals = fields.astype(np.uint32)
+    else:
+        # ipf == 32: big-endian 32-bit fields
+        if fmt == DataItemFormat.IEEE754_SINGLE and di == 32:
+            # Directly interpret as float32 fields
+            floats = np.frombuffer(payload, dtype=">f4")  # type: ignore[arg-type]
+            if floats.size % 2 != 0:
+                raise ValueError("Payload does not contain an even number of components for I/Q")
+            iq = floats.reshape(-1, 2).astype(np.float32)
+            return (iq[:, 0] + 1j * iq[:, 1]).astype(np.complex64)
+        # Otherwise treat as u32 and mask lower di bits
+        fields32 = np.frombuffer(payload, dtype=">u4")  # type: ignore[arg-type]
+        uvals = fields32
+
+    # Extract data item from lower di bits (right-justified assumption)
+    if di < 32:
+        mask = (1 << di) - 1
+        uvals = uvals & mask
+
+    # Convert to normalized float
+    import numpy as _np  # local alias for calculations
+    if fmt == DataItemFormat.SIGNED_FIXED_POINT:
+        sign_bit = 1 << (di - 1)
+        signed = _np.where(uvals & sign_bit, uvals - (1 << di), uvals).astype(_np.int64)
+        scale = float(1 << (di - 1))
+        vals = (signed.astype(_np.float32) / scale).astype(_np.float32)
+    elif fmt == DataItemFormat.UNSIGNED_FIXED_POINT:
+        scale = float(1 << di)
+        vals = (uvals.astype(_np.float32) / scale).astype(_np.float32)
+    else:
+        raise ValueError("Internal error: unexpected format in fixed-point decoder")
+
+    if vals.size % 2 != 0:
+        raise ValueError("Payload does not contain an even number of components for I/Q")
+
+    vec = vals.reshape(-1, 2)
+    return (vec[:, 0] + 1j * vec[:, 1]).astype(_np.complex64)
+
+
+def _encode_iq_payload(iq: "np.ndarray", pf: PayloadFormat) -> bytes:
+    import numpy as np  # lazy import
+
+    ipf, di, fmt = _validate_supported(pf)
+
+    # Normalize input to (N, 2) float32 array of I and Q
+    arr = np.asarray(iq)
+    if arr.dtype.kind == "c":
+        I = arr.real.astype(np.float32)
+        Q = arr.imag.astype(np.float32)
+        vec = np.stack([I, Q], axis=1)
+    else:
+        vec = arr.astype(np.float32)
+        if vec.ndim == 1:
+            raise ValueError("IQ array must be complex or shape (N,2)")
+        if vec.shape[-1] != 2:
+            raise ValueError("IQ array last dimension must be 2 (I,Q)")
+    vals = vec.reshape(-1).astype(np.float32)
+
+    if fmt == DataItemFormat.IEEE754_SINGLE and di == 32 and ipf == 32:
+        # Pack as big-endian float32 fields in I,Q order
+        return vals.astype(">f4").tobytes()
+
+    # Fixed-point encoding
+    if fmt == DataItemFormat.SIGNED_FIXED_POINT:
+        scale = float(1 << (di - 1))
+        # Clip to representable range [-1, 1 - 2^(1-di)]
+        max_val = (float((1 << (di - 1)) - 1)) / scale
+        vals = np.clip(vals, -1.0, max_val)
+        ints = np.rint(vals * scale).astype(np.int64)
+        # Convert to two's complement unsigned of di bits
+        uvals = (ints & ((1 << di) - 1)).astype(np.uint32)
+    else:  # UNSIGNED_FIXED_POINT
+        scale = float(1 << di)
+        max_val = (float((1 << di) - 1)) / scale
+        vals = np.clip(vals, 0.0, max_val)
+        uvals = np.rint(vals * scale).astype(np.uint32)
+
+    if ipf == 16 and di == 16:
+        return uvals.astype(">u2").tobytes()
+
+    # ipf == 32
+    if di == 32:
+        fields32 = uvals.astype(">u4").tobytes()
+        return fields32
+
+    # di in (16, 24) packed into lower bits of 32-bit field
+    fields32 = (uvals & ((1 << di) - 1)).astype(np.uint32)
+    return fields32.astype(">u4").tobytes()

@@ -27,7 +27,6 @@ class DataItemFormat(IntEnum):
     # 00000: Signed fixed-point (two's-complement), normalized [-1, 1-2^-(N-1)]
     SIGNED_FIXED_POINT = 0b00000
     IEEE754_SINGLE = 0b01110  # 32-bit float
-    IEEE754_DOUBLE = 0b01111  # 64-bit float (double)
     # 10000: Unsigned fixed-point, normalized [0, 1-2^-N]
     UNSIGNED_FIXED_POINT = 0b10000
 
