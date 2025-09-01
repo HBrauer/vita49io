@@ -1,0 +1,191 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import List, Optional
+
+from .enums import PacketType, TSI, TSF
+from .types import ClassID
+
+
+# Header bit masks (based on common VITA 49.0 usage)
+_HDR_PACKET_TYPE_MASK = 0xF0000000
+_HDR_C_MASK = 0x08000000  # Class ID present
+_HDR_T_MASK = 0x04000000  # Trailer present
+_HDR_R_MASK = 0x02000000  # Reserved (must be 0)
+_HDR_S_MASK = 0x01000000  # Stream ID present
+_HDR_TSI_MASK = 0x00C00000  # 2 bits
+_HDR_TSF_MASK = 0x00300000  # 2 bits
+_HDR_PKT_CNT_MASK = 0x000F0000  # 4 bits
+_HDR_PKT_SIZE_MASK = 0x0000FFFF  # 16 bits (32-bit words)
+
+
+def _u32(v: int) -> int:
+    return v & 0xFFFFFFFF
+
+
+def _pack_u32_le(v: int) -> bytes:
+    return _u32(v).to_bytes(4, byteorder="big")
+
+
+def _unpack_u32_be(b: bytes) -> int:
+    return int.from_bytes(b, byteorder="big")
+
+
+def _payload_bytes_to_words(payload: bytes) -> List[int]:
+    data = payload or b""
+    if len(data) % 4 != 0:
+        data += b"\x00" * (4 - (len(data) % 4))
+    return [_unpack_u32_be(data[i : i + 4]) for i in range(0, len(data), 4)]
+
+
+def _payload_words_to_bytes(words: List[int]) -> bytes:
+    b = bytearray()
+    for w in words:
+        b += _pack_u32_le(w)
+    return bytes(b)
+
+
+@dataclass
+class _Common:
+    packet_type: PacketType
+    stream_id: Optional[int]
+    class_id: Optional[ClassID]
+    tsi: TSI
+    tsf: TSF
+    integer_seconds: Optional[int]
+    fractional_seconds: Optional[int]
+    trailer: Optional[int]
+    packet_count: int
+
+
+def _pack_common_prefix(c: _Common) -> List[int]:
+    words: List[int] = []
+    w0 = 0
+    w0 |= (int(c.packet_type) & 0xF) << 28
+    if c.class_id is not None:
+        w0 |= _HDR_C_MASK
+    if c.trailer is not None:
+        w0 |= _HDR_T_MASK
+    if c.stream_id is not None:
+        w0 |= _HDR_S_MASK
+    w0 |= (int(c.tsi) & 0x3) << 22
+    w0 |= (int(c.tsf) & 0x3) << 20
+    w0 |= (c.packet_count & 0xF) << 16
+    words.append(w0)
+
+    if c.stream_id is not None:
+        words.append(_u32(c.stream_id))
+
+    if c.class_id is not None:
+        oui, ic, pc = c.class_id
+        words.append(_u32((oui & 0xFFFFFF) << 8))
+        words.append(_u32(((ic & 0xFFFF) << 16) | (pc & 0xFFFF)))
+
+    if c.tsi != TSI.NONE:
+        if c.integer_seconds is None:
+            raise ValueError("TSI set but integer_seconds is None")
+        words.append(_u32(c.integer_seconds))
+
+    if c.tsf != TSF.NONE:
+        if c.fractional_seconds is None:
+            raise ValueError("TSF set but fractional_seconds is None")
+        words.append(_u32(c.fractional_seconds))
+
+    return words
+
+
+def _finalize_words_to_bytes(words: List[int]) -> bytes:
+    words[0] = (words[0] & ~_HDR_PKT_SIZE_MASK) | (len(words) & _HDR_PKT_SIZE_MASK)
+    out = bytearray()
+    for w in words:
+        out += _pack_u32_le(w)
+    return bytes(out)
+
+
+def _parse_common_from_words(words: List[int]) -> tuple[_Common, int, int]:
+    if not words:
+        raise ValueError("Empty words for VRT packet")
+    w0 = words[0]
+    pkt_type = PacketType((w0 & _HDR_PACKET_TYPE_MASK) >> 28)
+    c_present = bool(w0 & _HDR_C_MASK)
+    t_present = bool(w0 & _HDR_T_MASK)
+    s_present = bool(w0 & _HDR_S_MASK)
+    tsi = TSI((w0 & _HDR_TSI_MASK) >> 22)
+    tsf = TSF((w0 & _HDR_TSF_MASK) >> 20)
+    pkt_cnt = (w0 & _HDR_PKT_CNT_MASK) >> 16
+    pkt_size_words = w0 & _HDR_PKT_SIZE_MASK
+
+    if pkt_size_words != len(words):
+        raise ValueError("Packet size mismatch")
+
+    idx = 1
+    stream_id: Optional[int] = None
+    class_id: Optional[ClassID] = None
+    integer_seconds: Optional[int] = None
+    fractional_seconds: Optional[int] = None
+
+    if s_present:
+        if idx >= len(words):
+            raise ValueError("Truncated after header: missing Stream ID")
+        stream_id = words[idx]
+        idx += 1
+
+    if c_present:
+        if idx + 1 >= len(words):
+            raise ValueError("Truncated: missing Class ID words")
+        w_a = words[idx]
+        w_b = words[idx + 1]
+        idx += 2
+        oui = (w_a >> 8) & 0xFFFFFF
+        information_class = (w_b >> 16) & 0xFFFF
+        packet_class = w_b & 0xFFFF
+        class_id = (oui, information_class, packet_class)
+
+    if tsi != TSI.NONE:
+        if idx >= len(words):
+            raise ValueError("Truncated: missing integer seconds")
+        integer_seconds = words[idx]
+        idx += 1
+
+    if tsf != TSF.NONE:
+        if idx >= len(words):
+            raise ValueError("Truncated: missing fractional seconds")
+        fractional_seconds = words[idx]
+        idx += 1
+
+    trailer: Optional[int] = None
+    end_idx = len(words)
+    if t_present:
+        trailer = words[-1]
+        end_idx -= 1
+
+    common = _Common(
+        packet_type=pkt_type,
+        stream_id=stream_id,
+        class_id=class_id,
+        tsi=tsi,
+        tsf=tsf,
+        integer_seconds=integer_seconds,
+        fractional_seconds=fractional_seconds,
+        trailer=trailer,
+        packet_count=pkt_cnt,
+    )
+    return common, idx, end_idx
+
+
+__all__ = [
+    "PacketType",
+    "TSI",
+    "TSF",
+    "ClassID",
+    "_u32",
+    "_pack_u32_le",
+    "_unpack_u32_be",
+    "_payload_bytes_to_words",
+    "_payload_words_to_bytes",
+    "_Common",
+    "_pack_common_prefix",
+    "_finalize_words_to_bytes",
+    "_parse_common_from_words",
+]
+
