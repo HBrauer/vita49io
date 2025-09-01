@@ -6,12 +6,12 @@ from typing import Optional, Tuple, List
 
 
 class PacketType(IntEnum):
-    IF_DATA = 0
-    IF_CONTEXT = 1
-    EXT_DATA = 2
-    EXT_CONTEXT = 3
-    COMMAND = 4
-    # 5-14 reserved, 15 = context assoc list (per some impls).
+    IF_DATA_WITHOUT_STREAM_ID = 0x0
+    IF_DATA_WITH_STREAM_ID = 0x1
+    EXTENSION_DATA_WITHOUT_STREAM_ID = 0x2
+    EXTENSION_DATA_WITH_STREAM_ID = 0x3
+    CONTEXT_PACKET = 0x4
+    # 0x5–0xF reserved
 
 
 class TSI(IntEnum):
@@ -212,8 +212,27 @@ class DataPacket:
     packet_count: int = 0
 
     def pack(self) -> bytes:
-        if self.packet_type not in (PacketType.IF_DATA, PacketType.EXT_DATA):
-            raise ValueError("DataPacket must have IF_DATA or EXT_DATA packet_type")
+        if self.packet_type not in (
+            PacketType.IF_DATA_WITHOUT_STREAM_ID,
+            PacketType.IF_DATA_WITH_STREAM_ID,
+            PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
+            PacketType.EXTENSION_DATA_WITH_STREAM_ID,
+        ):
+            raise ValueError(
+                "DataPacket must be IF/EXT data (with/without Stream ID)"
+            )
+
+        # Enforce consistency between packet type and Stream ID presence
+        if self.packet_type in (
+            PacketType.IF_DATA_WITH_STREAM_ID,
+            PacketType.EXTENSION_DATA_WITH_STREAM_ID,
+        ) and self.stream_id is None:
+            raise ValueError("Packet type requires a Stream ID, but none provided")
+        if self.packet_type in (
+            PacketType.IF_DATA_WITHOUT_STREAM_ID,
+            PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
+        ) and self.stream_id is not None:
+            raise ValueError("Packet type forbids a Stream ID, but one was provided")
 
         common = _Common(
             packet_type=self.packet_type,
@@ -238,7 +257,12 @@ class DataPacket:
             raise ValueError("Invalid VRT packet length")
         words = [_unpack_u32_be(data[i : i + 4]) for i in range(0, len(data), 4)]
         common, idx, end_idx = _parse_common_from_words(words)
-        if common.packet_type not in (PacketType.IF_DATA, PacketType.EXT_DATA):
+        if common.packet_type not in (
+            PacketType.IF_DATA_WITHOUT_STREAM_ID,
+            PacketType.IF_DATA_WITH_STREAM_ID,
+            PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
+            PacketType.EXTENSION_DATA_WITH_STREAM_ID,
+        ):
             raise ValueError("Not a Data packet type")
         payload = _payload_words_to_bytes(words[idx:end_idx])
         return DataPacket(
@@ -269,8 +293,8 @@ class ContextPacket:
     packet_count: int = 0
 
     def pack(self) -> bytes:
-        if self.packet_type not in (PacketType.IF_CONTEXT, PacketType.EXT_CONTEXT):
-            raise ValueError("ContextPacket must have IF_CONTEXT or EXT_CONTEXT packet_type")
+        if self.packet_type is not PacketType.CONTEXT_PACKET:
+            raise ValueError("ContextPacket must have CONTEXT_PACKET packet_type")
 
         common = _Common(
             packet_type=self.packet_type,
@@ -295,7 +319,7 @@ class ContextPacket:
             raise ValueError("Invalid VRT packet length")
         words = [_unpack_u32_be(data[i : i + 4]) for i in range(0, len(data), 4)]
         common, idx, end_idx = _parse_common_from_words(words)
-        if common.packet_type not in (PacketType.IF_CONTEXT, PacketType.EXT_CONTEXT):
+        if common.packet_type is not PacketType.CONTEXT_PACKET:
             raise ValueError("Not a Context packet type")
         payload = _payload_words_to_bytes(words[idx:end_idx])
         return ContextPacket(

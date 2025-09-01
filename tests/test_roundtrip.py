@@ -6,7 +6,7 @@ from vita49 import DataPacket, ContextPacket, PacketType, TSI, TSF
 class TestVRT(unittest.TestCase):
     def test_minimal_if_data_roundtrip(self):
         p = DataPacket(
-            packet_type=PacketType.IF_DATA,
+            packet_type=PacketType.IF_DATA_WITH_STREAM_ID,
             stream_id=0x12345678,
             tsi=TSI.UTC,
             tsf=TSF.FRACTIONAL,
@@ -18,7 +18,7 @@ class TestVRT(unittest.TestCase):
         b = p.pack()
         q = DataPacket.parse(b)
 
-        self.assertEqual(q.packet_type, PacketType.IF_DATA)
+        self.assertEqual(q.packet_type, PacketType.IF_DATA_WITH_STREAM_ID)
         self.assertEqual(q.stream_id, 0x12345678)
         self.assertEqual(q.tsi, TSI.UTC)
         self.assertEqual(q.tsf, TSF.FRACTIONAL)
@@ -29,7 +29,7 @@ class TestVRT(unittest.TestCase):
 
     def test_with_class_id_and_trailer(self):
         p = ContextPacket(
-            packet_type=PacketType.IF_CONTEXT,
+            packet_type=PacketType.CONTEXT_PACKET,
             stream_id=None,
             class_id=(0x00AABB, 0x1122, 0x3344),
             tsi=TSI.NONE,
@@ -39,7 +39,7 @@ class TestVRT(unittest.TestCase):
         )
         b = p.pack()
         q = ContextPacket.parse(b)
-        self.assertEqual(q.packet_type, PacketType.IF_CONTEXT)
+        self.assertEqual(q.packet_type, PacketType.CONTEXT_PACKET)
         self.assertIsNone(q.stream_id)
         self.assertEqual(q.class_id, (0x00AABB, 0x1122, 0x3344))
         self.assertEqual(q.tsi, TSI.NONE)
