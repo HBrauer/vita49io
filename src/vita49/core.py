@@ -145,7 +145,9 @@ def _pack_common_prefix(c: _Common) -> List[int]:
     if c.header.tsf != TSF.NONE:
         if c.fractional_seconds is None:
             raise ValueError("TSF set but fractional_seconds is None")
-        words.append(_u32(c.fractional_seconds))
+        fs = int(c.fractional_seconds) & 0xFFFFFFFFFFFFFFFF
+        words.append(_u32((fs >> 32) & 0xFFFFFFFF))
+        words.append(_u32(fs & 0xFFFFFFFF))
 
     return words
 
@@ -205,10 +207,12 @@ def _parse_common_from_words(words: List[int]) -> tuple[_Common, int, int]:
         idx += 1
 
     if tsf != TSF.NONE:
-        if idx >= len(words):
+        if idx + 1 >= len(words):
             raise ValueError("Truncated: missing fractional seconds")
-        fractional_seconds = words[idx]
-        idx += 1
+        msw = words[idx]
+        lsw = words[idx + 1]
+        fractional_seconds = ((msw & 0xFFFFFFFF) << 32) | (lsw & 0xFFFFFFFF)
+        idx += 2
 
     trailer: Optional[int] = None
     end_idx = len(words)

@@ -5,7 +5,10 @@ from typing import Optional, Tuple, List
 
 from .core import (
     Header,
+    _Common,
     _finalize_words_to_bytes,
+    _pack_common_prefix,
+    _parse_common_from_words,
     _payload_bytes_to_words,
     _payload_words_to_bytes,
     _unpack_u32_be,
@@ -53,7 +56,7 @@ class DataPacket:
         if self.integer_seconds is not None:
             parts.append(f"integer_seconds={self.integer_seconds}")
         if self.fractional_seconds is not None:
-            parts.append(f"fractional_seconds={_hex32(self.fractional_seconds)}")
+            parts.append(f"fractional_seconds={int(self.fractional_seconds)}")
         # Keep payload concise; show length only
         parts.append(f"payload_len={len(self.payload)}")
         if self.trailer is not None:
@@ -98,41 +101,25 @@ class DataPacket:
         ) and self.stream_id is not None:
             raise ValueError("Packet type forbids a Stream ID, but one was provided")
 
-        # Build header word (size filled in later)
-        header = Header(
-            packet_type=self.packet_type,
-            class_id_present=self.class_id is not None,
-            trailer_present=self.trailer is not None,
-            packet_specific_indicators=0,
-            tsi=self.tsi,
-            tsf=self.tsf,
-            packet_count=self.packet_count,
-            packet_size=0,
+        # Build common prefix using _Common helper
+        common = _Common(
+            header=Header(
+                packet_type=self.packet_type,
+                class_id_present=self.class_id is not None,
+                trailer_present=self.trailer is not None,
+                packet_specific_indicators=0,
+                tsi=self.tsi,
+                tsf=self.tsf,
+                packet_count=self.packet_count,
+                packet_size=0,
+            ),
+            stream_id=self.stream_id,
+            class_id=self.class_id,
+            integer_seconds=self.integer_seconds,
+            fractional_seconds=self.fractional_seconds,
+            trailer=self.trailer,
         )
-        words: List[int] = [header.pack()]
-
-        # Stream ID (based on packet type)
-        if self.packet_type in (
-            PacketType.IF_DATA_WITH_STREAM_ID,
-            PacketType.EXTENSION_DATA_WITH_STREAM_ID,
-        ):
-            words.append(_u32(self.stream_id))  # type: ignore[arg-type]
-
-        # Class ID
-        if self.class_id is not None:
-            oui, ic, pc = self.class_id
-            words.append(_u32((oui & 0xFFFFFF) << 8))
-            words.append(_u32(((ic & 0xFFFF) << 16) | (pc & 0xFFFF)))
-
-        # Timestamps
-        if self.tsi != TSI.NONE:
-            if self.integer_seconds is None:
-                raise ValueError("TSI set but integer_seconds is None")
-            words.append(_u32(self.integer_seconds))
-        if self.tsf != TSF.NONE:
-            if self.fractional_seconds is None:
-                raise ValueError("TSF set but fractional_seconds is None")
-            words.append(_u32(self.fractional_seconds))
+        words: List[int] = _pack_common_prefix(common)
 
         # If IQ samples are provided and a payload_format is given, encode IQ
         # into payload bytes according to the supported subset. Otherwise use
@@ -152,9 +139,8 @@ class DataPacket:
         if len(data) < 4 or len(data) % 4 != 0:
             raise ValueError("Invalid VRT packet length")
         words = [_unpack_u32_be(data[i : i + 4]) for i in range(0, len(data), 4)]
-        header = Header.parse(words[0])
-        if header.packet_size != len(words):
-            raise ValueError("Packet size mismatch")
+        common, idx, end_idx = _parse_common_from_words(words)
+        header = common.header
         if header.packet_type not in (
             PacketType.IF_DATA_WITHOUT_STREAM_ID,
             PacketType.IF_DATA_WITH_STREAM_ID,
@@ -162,47 +148,8 @@ class DataPacket:
             PacketType.EXTENSION_DATA_WITH_STREAM_ID,
         ):
             raise ValueError("Not a Data packet type")
-        idx = 1
-
-        stream_id = None
-        if header.packet_type in (
-            PacketType.IF_DATA_WITH_STREAM_ID,
-            PacketType.EXTENSION_DATA_WITH_STREAM_ID,
-        ):
-            if idx >= len(words):
-                raise ValueError("Truncated after header: missing Stream ID")
-            stream_id = words[idx]
-            idx += 1
-
-        class_id = None
-        if header.class_id_present:
-            if idx + 1 >= len(words):
-                raise ValueError("Truncated: missing Class ID words")
-            w_a = words[idx]
-            w_b = words[idx + 1]
-            idx += 2
-            oui = (w_a >> 8) & 0xFFFFFF
-            information_class = (w_b >> 16) & 0xFFFF
-            packet_class = w_b & 0xFFFF
-            class_id = (oui, information_class, packet_class)
-
-        integer_seconds = None
-        if header.tsi != TSI.NONE:
-            if idx >= len(words):
-                raise ValueError("Truncated: missing integer seconds")
-            integer_seconds = words[idx]
-            idx += 1
-
-        fractional_seconds = None
-        if header.tsf != TSF.NONE:
-            if idx >= len(words):
-                raise ValueError("Truncated: missing fractional seconds")
-            fractional_seconds = words[idx]
-            idx += 1
-
-        end_idx = len(words) - (1 if header.trailer_present else 0)
         payload = _payload_words_to_bytes(words[idx:end_idx])
-        trailer = words[-1] if header.trailer_present else None
+        trailer = common.trailer
 
         iq = None
         if payload_format is not None:
@@ -210,12 +157,12 @@ class DataPacket:
 
         return DataPacket(
             packet_type=header.packet_type,
-            stream_id=stream_id,
-            class_id=class_id,
+            stream_id=common.stream_id,
+            class_id=common.class_id,
             tsi=header.tsi,
             tsf=header.tsf,
-            integer_seconds=integer_seconds,
-            fractional_seconds=fractional_seconds,
+            integer_seconds=common.integer_seconds,
+            fractional_seconds=common.fractional_seconds,
             payload=payload,
             trailer=trailer,
             packet_count=header.packet_count,
