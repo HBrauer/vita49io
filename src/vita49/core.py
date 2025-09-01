@@ -11,8 +11,7 @@ from .types import ClassID
 _HDR_PACKET_TYPE_MASK = 0xF0000000
 _HDR_C_MASK = 0x08000000  # Class ID present
 _HDR_T_MASK = 0x04000000  # Trailer present
-_HDR_R_MASK = 0x02000000  # Reserved (must be 0)
-_HDR_S_MASK = 0x01000000  # Stream ID present
+_HDR_PSI_MASK = 0x03000000  # Packet Specific Indicators (bits 25-24)
 _HDR_TSI_MASK = 0x00C00000  # 2 bits
 _HDR_TSF_MASK = 0x00300000  # 2 bits
 _HDR_PKT_CNT_MASK = 0x000F0000  # 4 bits
@@ -46,34 +45,91 @@ def _payload_words_to_bytes(words: List[int]) -> bytes:
 
 
 @dataclass
-class _Common:
+class Header:
     packet_type: PacketType
+    class_id_present: bool = False
+    trailer_present: bool = False
+    packet_specific_indicators: int = 0  # 2 bits (bits 25-24)
+    tsi: TSI = TSI.NONE
+    tsf: TSF = TSF.NONE
+    packet_count: int = 0  # 4 bits
+    packet_size: int = 0  # total words
+
+    def pack(self) -> int:
+        if not (0 <= self.packet_specific_indicators <= 3):
+            raise ValueError("packet_specific_indicators must be in 0..3")
+        if not (0 <= self.packet_count <= 0xF):
+            raise ValueError("packet_count must be in 0..15")
+        if not (0 <= self.packet_size <= 0xFFFF):
+            raise ValueError("packet_size must be in 0..65535 (words)")
+
+        w0 = 0
+        w0 |= (int(self.packet_type) & 0xF) << 28
+        if self.class_id_present:
+            w0 |= _HDR_C_MASK
+        if self.trailer_present:
+            w0 |= _HDR_T_MASK
+        w0 |= (self.packet_specific_indicators & 0x3) << 24
+        w0 |= (int(self.tsi) & 0x3) << 22
+        w0 |= (int(self.tsf) & 0x3) << 20
+        w0 |= (self.packet_count & 0xF) << 16
+        w0 |= (self.packet_size & 0xFFFF)
+        return _u32(w0)
+
+    @staticmethod
+    def parse(w0: int) -> "Header":
+        pkt_type = PacketType((w0 & _HDR_PACKET_TYPE_MASK) >> 28)
+        c_present = bool(w0 & _HDR_C_MASK)
+        t_present = bool(w0 & _HDR_T_MASK)
+        psi = (w0 & _HDR_PSI_MASK) >> 24
+        tsi = TSI((w0 & _HDR_TSI_MASK) >> 22)
+        tsf = TSF((w0 & _HDR_TSF_MASK) >> 20)
+        pkt_cnt = (w0 & _HDR_PKT_CNT_MASK) >> 16
+        pkt_size_words = w0 & _HDR_PKT_SIZE_MASK
+        return Header(
+            packet_type=pkt_type,
+            class_id_present=c_present,
+            trailer_present=t_present,
+            packet_specific_indicators=int(psi),
+            tsi=tsi,
+            tsf=tsf,
+            packet_count=int(pkt_cnt),
+            packet_size=int(pkt_size_words),
+        )
+
+
+@dataclass
+class _Common:
+    header: Header
     stream_id: Optional[int]
     class_id: Optional[ClassID]
-    tsi: TSI
-    tsf: TSF
     integer_seconds: Optional[int]
     fractional_seconds: Optional[int]
     trailer: Optional[int]
-    packet_count: int
 
 
 def _pack_common_prefix(c: _Common) -> List[int]:
     words: List[int] = []
-    w0 = 0
-    w0 |= (int(c.packet_type) & 0xF) << 28
-    if c.class_id is not None:
-        w0 |= _HDR_C_MASK
-    if c.trailer is not None:
-        w0 |= _HDR_T_MASK
-    if c.stream_id is not None:
-        w0 |= _HDR_S_MASK
-    w0 |= (int(c.tsi) & 0x3) << 22
-    w0 |= (int(c.tsf) & 0x3) << 20
-    w0 |= (c.packet_count & 0xF) << 16
-    words.append(w0)
+    # Build header word using provided header with presence flags synced
+    hdr = Header(
+        packet_type=c.header.packet_type,
+        class_id_present=c.class_id is not None,
+        trailer_present=c.trailer is not None,
+        packet_specific_indicators=c.header.packet_specific_indicators,
+        tsi=c.header.tsi,
+        tsf=c.header.tsf,
+        packet_count=c.header.packet_count,
+        packet_size=0,
+    )
+    words.append(hdr.pack())
 
-    if c.stream_id is not None:
+    # Stream ID presence driven by packet type
+    if c.header.packet_type in (
+        PacketType.IF_DATA_WITH_STREAM_ID,
+        PacketType.EXTENSION_DATA_WITH_STREAM_ID,
+    ):
+        if c.stream_id is None:
+            raise ValueError("Packet type requires a Stream ID, but none provided")
         words.append(_u32(c.stream_id))
 
     if c.class_id is not None:
@@ -81,12 +137,12 @@ def _pack_common_prefix(c: _Common) -> List[int]:
         words.append(_u32((oui & 0xFFFFFF) << 8))
         words.append(_u32(((ic & 0xFFFF) << 16) | (pc & 0xFFFF)))
 
-    if c.tsi != TSI.NONE:
+    if c.header.tsi != TSI.NONE:
         if c.integer_seconds is None:
             raise ValueError("TSI set but integer_seconds is None")
         words.append(_u32(c.integer_seconds))
 
-    if c.tsf != TSF.NONE:
+    if c.header.tsf != TSF.NONE:
         if c.fractional_seconds is None:
             raise ValueError("TSF set but fractional_seconds is None")
         words.append(_u32(c.fractional_seconds))
@@ -95,6 +151,7 @@ def _pack_common_prefix(c: _Common) -> List[int]:
 
 
 def _finalize_words_to_bytes(words: List[int]) -> bytes:
+    # Update size in-place while preserving other bits
     words[0] = (words[0] & ~_HDR_PKT_SIZE_MASK) | (len(words) & _HDR_PKT_SIZE_MASK)
     out = bytearray()
     for w in words:
@@ -105,15 +162,14 @@ def _finalize_words_to_bytes(words: List[int]) -> bytes:
 def _parse_common_from_words(words: List[int]) -> tuple[_Common, int, int]:
     if not words:
         raise ValueError("Empty words for VRT packet")
-    w0 = words[0]
-    pkt_type = PacketType((w0 & _HDR_PACKET_TYPE_MASK) >> 28)
-    c_present = bool(w0 & _HDR_C_MASK)
-    t_present = bool(w0 & _HDR_T_MASK)
-    s_present = bool(w0 & _HDR_S_MASK)
-    tsi = TSI((w0 & _HDR_TSI_MASK) >> 22)
-    tsf = TSF((w0 & _HDR_TSF_MASK) >> 20)
-    pkt_cnt = (w0 & _HDR_PKT_CNT_MASK) >> 16
-    pkt_size_words = w0 & _HDR_PKT_SIZE_MASK
+    hdr = Header.parse(words[0])
+    pkt_type = hdr.packet_type
+    c_present = hdr.class_id_present
+    t_present = hdr.trailer_present
+    tsi = hdr.tsi
+    tsf = hdr.tsf
+    pkt_cnt = hdr.packet_count
+    pkt_size_words = hdr.packet_size
 
     if pkt_size_words != len(words):
         raise ValueError("Packet size mismatch")
@@ -124,7 +180,8 @@ def _parse_common_from_words(words: List[int]) -> tuple[_Common, int, int]:
     integer_seconds: Optional[int] = None
     fractional_seconds: Optional[int] = None
 
-    if s_present:
+    # Stream ID presence is determined by packet type (with/without) in this model
+    if pkt_type in (PacketType.IF_DATA_WITH_STREAM_ID, PacketType.EXTENSION_DATA_WITH_STREAM_ID):
         if idx >= len(words):
             raise ValueError("Truncated after header: missing Stream ID")
         stream_id = words[idx]
@@ -160,15 +217,12 @@ def _parse_common_from_words(words: List[int]) -> tuple[_Common, int, int]:
         end_idx -= 1
 
     common = _Common(
-        packet_type=pkt_type,
+        header=hdr,
         stream_id=stream_id,
         class_id=class_id,
-        tsi=tsi,
-        tsf=tsf,
         integer_seconds=integer_seconds,
         fractional_seconds=fractional_seconds,
         trailer=trailer,
-        packet_count=pkt_cnt,
     )
     return common, idx, end_idx
 
@@ -183,9 +237,9 @@ __all__ = [
     "_unpack_u32_be",
     "_payload_bytes_to_words",
     "_payload_words_to_bytes",
+    "Header",
     "_Common",
     "_pack_common_prefix",
     "_finalize_words_to_bytes",
     "_parse_common_from_words",
 ]
-
