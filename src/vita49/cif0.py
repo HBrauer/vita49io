@@ -69,7 +69,8 @@ class PayloadFormat:
         item_packing_field_size_bits = ((w0 >> 6) & 0x3F) + 1  # stored as value-1
         data_item_size_bits = (w0 & 0x3F) + 1  # stored as value-1
 
-        repeat_count = ((w1 >> 16) & 0xFFFF) 
+        repeat_count = ((w1 >> 16) & 0xFFFF)
+        # Some captures may encode 0 here; treat it as 1 per common practice.
         if repeat_count == 0:
             repeat_count = 1
             print("WARNING: repeat count == 0, which is undefined in Vita 49.2, process as it is 1")

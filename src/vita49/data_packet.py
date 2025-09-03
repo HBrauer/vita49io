@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional, Tuple, List
+import numpy as np
 
 from .core import (
     Header,
@@ -220,55 +221,65 @@ def _validate_supported(pf: PayloadFormat) -> Tuple[int, int, DataItemFormat]:
 
 
 def _decode_iq_payload(payload: bytes, pf: PayloadFormat):
-    import numpy as np  # lazy import to avoid hard dependency when unused
 
     ipf, di, fmt = _validate_supported(pf)
 
-    # Field extraction according to packing field size
-    if ipf == 16:
-        # Big-endian 16-bit fields
-        fields = np.frombuffer(payload, dtype=">u2")  # type: ignore[arg-type]
-        uvals = fields.astype(np.uint32)
-    else:
-        # ipf == 32: big-endian 32-bit fields
-        if fmt == DataItemFormat.IEEE754_SINGLE and di == 32:
-            # Directly interpret as float32 fields
+    # Fast paths for common full-width cases
+    if ipf == 32 and di == 32:
+        if fmt == DataItemFormat.IEEE754_SINGLE:
             floats = np.frombuffer(payload, dtype=">f4")  # type: ignore[arg-type]
             if floats.size % 2 != 0:
                 raise ValueError("Payload does not contain an even number of components for I/Q")
             iq = floats.reshape(-1, 2).astype(np.float32)
             return (iq[:, 0] + 1j * iq[:, 1]).astype(np.complex64)
-        # Otherwise treat as u32 and mask lower di bits
-        fields32 = np.frombuffer(payload, dtype=">u4")  # type: ignore[arg-type]
-        uvals = fields32
-
-    # Extract data item from lower di bits (right-justified assumption)
-    if di < 32:
-        mask = (1 << di) - 1
-        uvals = uvals & mask
-
-    # Convert to normalized float
-    import numpy as _np  # local alias for calculations
-    if fmt == DataItemFormat.SIGNED_FIXED_POINT:
-        sign_bit = 1 << (di - 1)
-        signed = _np.where(uvals & sign_bit, uvals - (1 << di), uvals).astype(_np.int64)
-        scale = float(1 << (di - 1))
-        vals = (signed.astype(_np.float32) / scale).astype(_np.float32)
-    elif fmt == DataItemFormat.UNSIGNED_FIXED_POINT:
-        scale = float(1 << di)
-        vals = (uvals.astype(_np.float32) / scale).astype(_np.float32)
+        if fmt == DataItemFormat.SIGNED_FIXED_POINT:
+            s32 = np.frombuffer(payload, dtype=">i4")  # type: ignore[arg-type]
+            vals = (s32.astype(np.float32) / float(1 << 31)).astype(np.float32)
+        else:  # UNSIGNED_FIXED_POINT
+            u32 = np.frombuffer(payload, dtype=">u4")  # type: ignore[arg-type]
+            vals = (u32.astype(np.float32) / float(1 << 32)).astype(np.float32)
+    elif ipf == 16 and di == 16:
+        if fmt == DataItemFormat.SIGNED_FIXED_POINT:
+            s16 = np.frombuffer(payload, dtype=">i2")  # type: ignore[arg-type]
+            vals = (s16.astype(np.float32) / float(1 << 15)).astype(np.float32)
+        else:  # UNSIGNED_FIXED_POINT
+            u16 = np.frombuffer(payload, dtype=">u2")  # type: ignore[arg-type]
+            vals = (u16.astype(np.float32) / float(1 << 16)).astype(np.float32)
     else:
-        raise ValueError("Internal error: unexpected format in fixed-point decoder")
+        # Generic paths: extract fields as big-endian and unpack lower di bits
+        if ipf == 16:
+            fields = np.frombuffer(payload, dtype=">u2")  # type: ignore[arg-type]
+            uvals = fields.astype(np.uint32)
+        else:  # ipf == 32
+            fields32 = np.frombuffer(payload, dtype=">u4")  # type: ignore[arg-type]
+            uvals = fields32
 
+        if di < 32:
+            mask = (1 << di) - 1
+            uvals = (uvals & mask).astype(np.uint32, copy=False)
+
+        if fmt == DataItemFormat.SIGNED_FIXED_POINT:
+            # Sign-extend using arithmetic shifts for speed
+            if di < 32:
+                s = (uvals.astype(np.int32) << (32 - di)) >> (32 - di)
+            else:
+                s = uvals.astype(np.int32)
+            scale = float(1 << (di - 1))
+            vals = (s.astype(np.float32) / scale).astype(np.float32)
+        elif fmt == DataItemFormat.UNSIGNED_FIXED_POINT:
+            scale = float(1 << di)
+            vals = (uvals.astype(np.float32) / scale).astype(np.float32)
+        else:
+            raise ValueError("Internal error: unexpected format in fixed-point decoder")
+
+    # Convert interleaved I,Q values to complex
     if vals.size % 2 != 0:
         raise ValueError("Payload does not contain an even number of components for I/Q")
-
     vec = vals.reshape(-1, 2)
-    return (vec[:, 0] + 1j * vec[:, 1]).astype(_np.complex64)
+    return (vec[:, 0] + 1j * vec[:, 1]).astype(np.complex64)
 
 
 def _encode_iq_payload(iq: "np.ndarray", pf: PayloadFormat) -> bytes:
-    import numpy as np  # lazy import
 
     ipf, di, fmt = _validate_supported(pf)
 
@@ -286,35 +297,51 @@ def _encode_iq_payload(iq: "np.ndarray", pf: PayloadFormat) -> bytes:
             raise ValueError("IQ array last dimension must be 2 (I,Q)")
     vals = vec.reshape(-1).astype(np.float32)
 
-    if fmt == DataItemFormat.IEEE754_SINGLE and di == 32 and ipf == 32:
-        # Pack as big-endian float32 fields in I,Q order
-        return vals.astype(">f4").tobytes()
+    # Fast path: 32-bit fields
+    if ipf == 32 and di == 32:
+        if fmt == DataItemFormat.IEEE754_SINGLE:
+            return vals.astype(">f4").tobytes()
+        if fmt == DataItemFormat.SIGNED_FIXED_POINT:
+            scale = float(1 << 31)
+            max_val = (float((1 << 31) - 1)) / scale
+            vals_c = np.clip(vals, -1.0, max_val)
+            ints = np.rint(vals_c * scale).astype(np.int32)
+            return ints.astype(">i4").tobytes()
+        else:  # UNSIGNED_FIXED_POINT
+            scale = float(1 << 32)
+            max_val = (float((1 << 32) - 1)) / scale
+            vals_c = np.clip(vals, 0.0, max_val)
+            u32 = np.rint(vals_c * scale).astype(np.uint32)
+            return u32.astype(">u4").tobytes()
 
-    # Fixed-point encoding
+    # Fast path: 16-bit fields
+    if ipf == 16 and di == 16:
+        if fmt == DataItemFormat.SIGNED_FIXED_POINT:
+            scale = float(1 << 15)
+            max_val = (float((1 << 15) - 1)) / scale
+            vals_c = np.clip(vals, -1.0, max_val)
+            i16 = np.rint(vals_c * scale).astype(np.int16)
+            return i16.astype(">i2").tobytes()
+        else:  # UNSIGNED_FIXED_POINT
+            scale = float(1 << 16)
+            max_val = (float((1 << 16) - 1)) / scale
+            vals_c = np.clip(vals, 0.0, max_val)
+            u16 = np.rint(vals_c * scale).astype(np.uint16)
+            return u16.astype(">u2").tobytes()
+
+    # Generic fixed-point encoding into 32-bit fields (16 or 24-bit in lower bits)
     if fmt == DataItemFormat.SIGNED_FIXED_POINT:
         scale = float(1 << (di - 1))
-        # Clip to representable range [-1, 1 - 2^(1-di)]
         max_val = (float((1 << (di - 1)) - 1)) / scale
-        vals = np.clip(vals, -1.0, max_val)
-        ints = np.rint(vals * scale).astype(np.int64)
-        # Convert to two's complement unsigned of di bits
+        vals_c = np.clip(vals, -1.0, max_val)
+        ints = np.rint(vals_c * scale).astype(np.int64)
         uvals = (ints & ((1 << di) - 1)).astype(np.uint32)
     else:  # UNSIGNED_FIXED_POINT
         scale = float(1 << di)
         max_val = (float((1 << di) - 1)) / scale
-        vals = np.clip(vals, 0.0, max_val)
-        uvals = np.rint(vals * scale).astype(np.uint32)
+        vals_c = np.clip(vals, 0.0, max_val)
+        uvals = np.rint(vals_c * scale).astype(np.uint32)
 
-    if ipf == 16 and di == 16:
-        return uvals.astype(">u2").tobytes()
-
-    # ipf == 32
-    if di == 32:
-        fields32 = uvals.astype(">u4").tobytes()
-        return fields32
-
-    # di in (16, 24) packed into lower bits of 32-bit field
+    # ipf == 32 here; pack lower di bits of 32-bit field
     fields32 = (uvals & ((1 << di) - 1)).astype(np.uint32)
     return fields32.astype(">u4").tobytes()
-
-
