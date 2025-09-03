@@ -70,6 +70,9 @@ class PayloadFormat:
         data_item_size_bits = (w0 & 0x3F) + 1  # stored as value-1
 
         repeat_count = ((w1 >> 16) & 0xFFFF) 
+        if repeat_count == 0:
+            repeat_count = 1
+            print("WARNING: repeat count == 0, which is undefined in Vita 49.2, process as it is 1")
         vector_size = (w1 & 0xFFFF) 
 
         return PayloadFormat(
@@ -301,12 +304,11 @@ class CIF0Fields:
         """
 
         # Reject unsupported lower bits explicitly requested by caller
-        unsupported_bits = [14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 0]
+        unsupported_bits = [14, 13, 12, 11, 10, 9, 8, 7,  0]
         bad = [b for b in unsupported_bits if (mask >> b) & 1]
         if bad:
-            raise ValueError(
-                f"Unsupported CIF0 fields present (presence bits set): {bad} {bin(mask)}"
-            )
+            print(f"WARNING: Unsupported CIF0 fields present (presence bits set): {bad} {bin(mask)}. Further reading might fail. ")
+            
 
         idx = 0
 
@@ -316,14 +318,11 @@ class CIF0Fields:
                 raise ValueError("Truncated CIF0 payload")
 
         f = CIF0Fields()
-        print(f"mask: {bin(mask)}")
-
 
         f.context_field_change_indicator = bool(mask & (1 << 31))
         if mask & (1 << 30):
             need(1)
             f.reference_point_identifier = field_words[idx]
-            print(f'Reference point: {hex(f.reference_point_identifier)}')
             idx += 1
         if mask & (1 << 29):
             need(2)

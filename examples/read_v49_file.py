@@ -43,6 +43,7 @@ def read_all_packets(path: str):
             w0 = int.from_bytes(w0_bytes, byteorder="big")
             header = Header.parse(w0)
             total_words = header.packet_size
+            print(total_words)
             if total_words <= 0:
                 raise ValueError(f"Invalid packet size (words) at packet {index}: {total_words}")
 
@@ -79,16 +80,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     _ensure_src_on_path()
 
     # Default path requested; allow override via CLI arg
-    default_path = r"F:\\VitaFiles\\pocsag.v49"
+    default_path = r"F:\\VitaFiles\\pocsag0309_cutting_time_dimension.v49"
     args = list(sys.argv[1:] if argv is None else argv)
     path = args[0] if args else default_path
 
-    try:
-        for pkt in read_all_packets(path):
-            print(pkt)
-    except Exception as e:
-        print(f"Error reading '{path}': {e}")
-        return 1
+   
+    for pkt in read_all_packets(path):
+        print(pkt)
 
     return 0
 
