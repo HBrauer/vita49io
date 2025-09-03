@@ -234,10 +234,12 @@ def _decode_iq_payload(payload: bytes, pf: PayloadFormat):
             return (iq[:, 0] + 1j * iq[:, 1]).astype(np.complex64)
         if fmt == DataItemFormat.SIGNED_FIXED_POINT:
             s32 = np.frombuffer(payload, dtype=">i4")  # type: ignore[arg-type]
-            vals = (s32.astype(np.float32) / float(1 << 31)).astype(np.float32)
+            # Use float64 for arithmetic, then cast to float32 to avoid precision loss
+            vals = (s32.astype(np.float64) / float(1 << 31)).astype(np.float32)
         else:  # UNSIGNED_FIXED_POINT
             u32 = np.frombuffer(payload, dtype=">u4")  # type: ignore[arg-type]
-            vals = (u32.astype(np.float32) / float(1 << 32)).astype(np.float32)
+            # Use float64 for arithmetic, then cast to float32 to avoid precision loss
+            vals = (u32.astype(np.float64) / float(1 << 32)).astype(np.float32)
     elif ipf == 16 and di == 16:
         if fmt == DataItemFormat.SIGNED_FIXED_POINT:
             s16 = np.frombuffer(payload, dtype=">i2")  # type: ignore[arg-type]
@@ -270,7 +272,7 @@ def _decode_iq_payload(payload: bytes, pf: PayloadFormat):
             scale = float(1 << di)
             vals = (uvals.astype(np.float32) / scale).astype(np.float32)
         else:
-            raise ValueError("Internal error: unexpected format in fixed-point decoder")
+            raise ValueError(f"Internal error: unexpected format in fixed-point decoder: {pf}")
 
     # Convert interleaved I,Q values to complex
     if vals.size % 2 != 0:
@@ -302,15 +304,19 @@ def _encode_iq_payload(iq: "np.ndarray", pf: PayloadFormat) -> bytes:
         if fmt == DataItemFormat.IEEE754_SINGLE:
             return vals.astype(">f4").tobytes()
         if fmt == DataItemFormat.SIGNED_FIXED_POINT:
+            # Perform arithmetic in float64 to reduce rounding artifacts
             scale = float(1 << 31)
             max_val = (float((1 << 31) - 1)) / scale
-            vals_c = np.clip(vals, -1.0, max_val)
+            vals64 = vals.astype(np.float64)
+            vals_c = np.clip(vals64, -1.0, max_val)
             ints = np.rint(vals_c * scale).astype(np.int32)
             return ints.astype(">i4").tobytes()
         else:  # UNSIGNED_FIXED_POINT
+            # Use float64 for clipping and scaling to avoid rounding 0.999.. to 1.0
             scale = float(1 << 32)
             max_val = (float((1 << 32) - 1)) / scale
-            vals_c = np.clip(vals, 0.0, max_val)
+            vals64 = vals.astype(np.float64)
+            vals_c = np.clip(vals64, 0.0, max_val)
             u32 = np.rint(vals_c * scale).astype(np.uint32)
             return u32.astype(">u4").tobytes()
 
