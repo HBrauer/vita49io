@@ -80,7 +80,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     _ensure_src_on_path()
 
     # Default path requested; allow override via CLI arg
-    default_path = r"F:\\VitaFiles\\pocsag0309_cutting_time_dimension.v49"
+    default_path = r"F:\\VitaFiles\\pocsag0309.v49"
     args = list(sys.argv[1:] if argv is None else argv)
     path = args[0] if args else default_path
 
