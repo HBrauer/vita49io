@@ -76,6 +76,21 @@ class Header:
         w0 |= (self.packet_size & 0xFFFF)
         return _u32(w0)
 
+    def __repr__(self) -> str:  # pragma: no cover - human-facing formatting
+        parts: list[str] = []
+        parts.append(f"packet_type={self.packet_type.name}")
+        parts.append(f"class_id_present={self.class_id_present}")
+        parts.append(f"trailer_present={self.trailer_present}")
+        if self.packet_specific_indicators:
+            parts.append(f"psi={self.packet_specific_indicators}")
+        if self.tsi != TSI.NONE:
+            parts.append(f"tsi={self.tsi.name}")
+        if self.tsf != TSF.NONE:
+            parts.append(f"tsf={self.tsf.name}")
+        parts.append(f"packet_count={self.packet_count}")
+        parts.append(f"packet_size={self.packet_size}")
+        return f"Header({', '.join(parts)})"
+
     @staticmethod
     def parse(w0: int) -> "Header":
         pkt_type = PacketType((w0 & _HDR_PACKET_TYPE_MASK) >> 28)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import argparse
 from typing import Optional
 
 
@@ -42,8 +43,8 @@ def read_all_packets(path: str):
 
             w0 = int.from_bytes(w0_bytes, byteorder="big")
             header = Header.parse(w0)
+            print(header)
             total_words = header.packet_size
-            print(total_words)
             if total_words <= 0:
                 raise ValueError(f"Invalid packet size (words) at packet {index}: {total_words}")
 
@@ -76,17 +77,31 @@ def read_all_packets(path: str):
             index += 1
 
 
+def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Read and print VITA 49 packets from a file",
+    )
+    parser.add_argument("input_file", help="Path to input VITA49 binary file")
+    parser.add_argument(
+        "-n",
+        "--max-packets",
+        type=int,
+        default=None,
+        help="Maximum number of packets to read (default: all)",
+    )
+    return parser.parse_args(argv)
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     _ensure_src_on_path()
 
-    # Default path requested; allow override via CLI arg
-    default_path = r"F:\\VitaFiles\\pocsag0309.v49"
-    args = list(sys.argv[1:] if argv is None else argv)
-    path = args[0] if args else default_path
-
-   
-    for pkt in read_all_packets(path):
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
+    count = 0
+    for pkt in read_all_packets(args.input_file):
         print(pkt)
+        count += 1
+        if args.max_packets is not None and count >= args.max_packets:
+            break
 
     return 0
 
