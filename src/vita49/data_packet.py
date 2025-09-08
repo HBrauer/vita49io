@@ -22,16 +22,13 @@ from .cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
 
 @dataclass
 class DataPacket:
-    packet_type: PacketType
+    header: Header
     stream_id: Optional[int] = None
     class_id: Optional[ClassID] = None
-    tsi: TSI = TSI.NONE
-    tsf: TSF = TSF.NONE
     integer_seconds: Optional[int] = None
     fractional_seconds: Optional[int] = None
     payload: bytes = b""
     trailer: Optional[int] = None
-    packet_count: int = 0
     # Optional decoded IQ samples (complex64) when a compatible PayloadFormat
     # is provided to parse(). Not serialized unless pack() is called with a
     # compatible payload_format.
@@ -42,7 +39,8 @@ class DataPacket:
             return f"0x{v & 0xFFFFFFFF:08X}"
 
         parts: List[str] = []
-        parts.append(f"packet_type={self.packet_type.name}")
+        # Summarize header inline
+        parts.append(f"packet_type={self.header.packet_type.name}")
         if self.stream_id is not None:
             parts.append(f"stream_id={_hex32(self.stream_id)}")
         if self.class_id is not None:
@@ -50,10 +48,10 @@ class DataPacket:
             parts.append(
                 f"class_id=(0x{oui & 0xFFFFFF:06X}, 0x{ic & 0xFFFF:04X}, 0x{pc & 0xFFFF:04X})"
             )
-        if self.tsi != TSI.NONE:
-            parts.append(f"tsi={self.tsi.name}")
-        if self.tsf != TSF.NONE:
-            parts.append(f"tsf={self.tsf.name}")
+        if self.header.tsi != TSI.NONE:
+            parts.append(f"tsi={self.header.tsi.name}")
+        if self.header.tsf != TSF.NONE:
+            parts.append(f"tsf={self.header.tsf.name}")
         if self.integer_seconds is not None:
             parts.append(f"integer_seconds={self.integer_seconds}")
         if self.fractional_seconds is not None:
@@ -63,7 +61,7 @@ class DataPacket:
         if self.trailer is not None:
             parts.append(f"trailer={_hex32(self.trailer)}")
         # Show packet count always for debugging sequences
-        parts.append(f"packet_count={self.packet_count}")
+        parts.append(f"packet_count={self.header.packet_count}")
         # If IQ present, summarize size without importing numpy
         if self.iq is not None:
             n = None
@@ -80,7 +78,7 @@ class DataPacket:
         return f"DataPacket({', '.join(parts)})"
 
     def pack(self, payload_format: Optional[PayloadFormat] = None) -> bytes:
-        if self.packet_type not in (
+        if self.header.packet_type not in (
             PacketType.IF_DATA_WITHOUT_STREAM_ID,
             PacketType.IF_DATA_WITH_STREAM_ID,
             PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
@@ -91,12 +89,12 @@ class DataPacket:
             )
 
         # Enforce consistency between packet type and Stream ID presence
-        if self.packet_type in (
+        if self.header.packet_type in (
             PacketType.IF_DATA_WITH_STREAM_ID,
             PacketType.EXTENSION_DATA_WITH_STREAM_ID,
         ) and self.stream_id is None:
             raise ValueError("Packet type requires a Stream ID, but none provided")
-        if self.packet_type in (
+        if self.header.packet_type in (
             PacketType.IF_DATA_WITHOUT_STREAM_ID,
             PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
         ) and self.stream_id is not None:
@@ -104,16 +102,7 @@ class DataPacket:
 
         # Build common prefix using _Common helper
         common = _Common(
-            header=Header(
-                packet_type=self.packet_type,
-                class_id_present=self.class_id is not None,
-                trailer_present=self.trailer is not None,
-                packet_specific_indicators=0,
-                tsi=self.tsi,
-                tsf=self.tsf,
-                packet_count=self.packet_count,
-                packet_size=0,
-            ),
+            header=self.header,
             stream_id=self.stream_id,
             class_id=self.class_id,
             integer_seconds=self.integer_seconds,
@@ -157,16 +146,13 @@ class DataPacket:
             iq = _decode_iq_payload(payload, payload_format)
 
         return DataPacket(
-            packet_type=header.packet_type,
+            header=header,
             stream_id=common.stream_id,
             class_id=common.class_id,
-            tsi=header.tsi,
-            tsf=header.tsf,
             integer_seconds=common.integer_seconds,
             fractional_seconds=common.fractional_seconds,
             payload=payload,
             trailer=trailer,
-            packet_count=header.packet_count,
             iq=iq,
         )
 

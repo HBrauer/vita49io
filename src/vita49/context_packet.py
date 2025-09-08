@@ -22,11 +22,9 @@ from .vrt_types import ClassID
 
 @dataclass
 class ContextPacket:
-    packet_type: PacketType
+    header: Header
     stream_id: Optional[int] = None
     class_id: Optional[ClassID] = None
-    tsi: TSI = TSI.NONE
-    tsf: TSF = TSF.NONE
     integer_seconds: Optional[int] = None
     fractional_seconds: Optional[int] = None
     payload: bytes = b""
@@ -37,13 +35,12 @@ class ContextPacket:
     # by the library; this is provided to indicate presence and raw capture.
     cif1: Optional[CIF1Fields] = None
     trailer: Optional[int] = None
-    packet_count: int = 0
 
     def __repr__(self) -> str:  # pragma: no cover - human-facing formatting
         def _hex32(v: int) -> str:
             return f"0x{v & 0xFFFFFFFF:08X}"
 
-        parts = [f"packet_type={self.packet_type.name}"]
+        parts = [f"packet_type={self.header.packet_type.name}"]
         if self.stream_id is not None:
             parts.append(f"stream_id={_hex32(self.stream_id)}")
         if self.class_id is not None:
@@ -51,10 +48,10 @@ class ContextPacket:
             parts.append(
                 f"class_id=(0x{oui & 0xFFFFFF:06X}, 0x{ic & 0xFFFF:04X}, 0x{pc & 0xFFFF:04X})"
             )
-        if self.tsi != TSI.NONE:
-            parts.append(f"tsi={self.tsi.name}")
-        if self.tsf != TSF.NONE:
-            parts.append(f"tsf={self.tsf.name}")
+        if self.header.tsi != TSI.NONE:
+            parts.append(f"tsi={self.header.tsi.name}")
+        if self.header.tsf != TSF.NONE:
+            parts.append(f"tsf={self.header.tsf.name}")
         if self.integer_seconds is not None:
             parts.append(f"integer_seconds={self.integer_seconds}")
         if self.fractional_seconds is not None:
@@ -67,27 +64,18 @@ class ContextPacket:
             parts.append("cif1=True")
         if self.trailer is not None:
             parts.append(f"trailer={_hex32(self.trailer)}")
-        parts.append(f"packet_count={self.packet_count}")
+        parts.append(f"packet_count={self.header.packet_count}")
         return f"ContextPacket({', '.join(parts)})"
 
     def pack(self) -> bytes:
-        if self.packet_type is not PacketType.CONTEXT_PACKET:
+        if self.header.packet_type is not PacketType.CONTEXT_PACKET:
             raise ValueError("ContextPacket must have CONTEXT_PACKET packet_type")
         if self.stream_id is None:
             raise ValueError("ContextPacket requires a Stream ID")
 
         # Build common prefix via _Common helper (stream_id ignored for context)
         common = _Common(
-            header=Header(
-                packet_type=self.packet_type,
-                class_id_present=self.class_id is not None,
-                trailer_present=self.trailer is not None,
-                packet_specific_indicators=0,
-                tsi=self.tsi,
-                tsf=self.tsf,
-                packet_count=self.packet_count,
-                packet_size=0,
-            ),
+            header=self.header,
             stream_id=self.stream_id,
             class_id=self.class_id,
             integer_seconds=self.integer_seconds,
@@ -140,18 +128,15 @@ class ContextPacket:
         # Convert payload words to bytes once for storage
         payload = _payload_words_to_bytes(p_words)
         return ContextPacket(
-            packet_type=header.packet_type,
+            header=header,
             stream_id=common.stream_id,
             class_id=common.class_id,
-            tsi=header.tsi,
-            tsf=header.tsf,
             integer_seconds=common.integer_seconds,
             fractional_seconds=common.fractional_seconds,
             payload=payload,
             cif0=parsed_cif0,
             cif1=parsed_cif1,
             trailer=trailer,
-            packet_count=header.packet_count,
         )
 
 __all__ = ["ContextPacket"]
