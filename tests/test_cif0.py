@@ -31,9 +31,9 @@ class TestCIF0(unittest.TestCase):
         b = p.pack()
         q = ContextPacket.parse(b)
 
-        # Parse CIF0 from the resulting payload and validate
-        parsed, used = CIF0Fields.parse(q.payload)
-        self.assertEqual(used, len(q.payload))
+        # Validate parsed CIF0 fields directly
+        self.assertIsNotNone(q.cif0)
+        parsed = q.cif0
         self.assertEqual(parsed.reference_point_identifier, 0x12345678)
         self.assertAlmostEqual(parsed.sample_rate_hz, 10_000_000.0, places=3)
         self.assertAlmostEqual(parsed.bandwidth_hz, 8_000_000.0, places=3)

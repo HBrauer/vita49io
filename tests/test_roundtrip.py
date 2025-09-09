@@ -1,6 +1,6 @@
 import unittest
 
-from vita49 import DataPacket, ContextPacket, PacketType, TSI, TSF
+from vita49 import DataPacket, ContextPacket, PacketType, TSI, TSF, CIF0Fields
 
 
 class TestVRT(unittest.TestCase):
@@ -28,13 +28,17 @@ class TestVRT(unittest.TestCase):
         self.assertEqual(q.packet_count, 7)
 
     def test_with_class_id_and_trailer(self):
+        # Raw CIF fields to carry alongside CIF0 (1 word)
+        extra_bytes = b"\x01\x02\x03\x04"
+        extra_word = int.from_bytes(extra_bytes, byteorder="big")
         p = ContextPacket(
             packet_type=PacketType.CONTEXT_PACKET,
             stream_id=0x01020304,
             class_id=(0x00AABB, 0x1122, 0x3344),
             tsi=TSI.NONE,
             tsf=TSF.NONE,
-            payload=b"\x01\x02\x03\x04",
+            cif0=CIF0Fields(),
+            raw_cif_fields=[extra_word],
             trailer=0xCAFEBABE,
         )
         b = p.pack()
@@ -44,7 +48,10 @@ class TestVRT(unittest.TestCase):
         self.assertEqual(q.class_id, (0x00AABB, 0x1122, 0x3344))
         self.assertEqual(q.tsi, TSI.NONE)
         self.assertEqual(q.tsf, TSF.NONE)
-        self.assertEqual(q.payload, b"\x01\x02\x03\x04")
+        # Reconstruct bytes from raw_cif_fields and compare
+        self.assertIsNotNone(q.raw_cif_fields)
+        got_bytes = b"".join(int(w).to_bytes(4, byteorder="big") for w in q.raw_cif_fields)
+        self.assertEqual(got_bytes, extra_bytes)
         self.assertEqual(q.trailer, 0xCAFEBABE)
 
     def test_data_header_roundtrip_all_types_tsi_tsf(self):
