@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import Optional, List, Tuple
 
 from .cif0 import CIF0Fields
-from .cif1 import CIF1Fields
 from .core import (
     Header,
     _Common,
@@ -29,9 +28,6 @@ class ContextPacket:
     # Optional structured CIF0. If provided when packing, it takes precedence
     # over the raw `payload` field and will be encoded as the payload.
     cif0: Optional[CIF0Fields] = None
-    # Optional parsed CIF1 (same format as CIF0). Values are currently ignored
-    # by the library; this is provided to indicate presence and raw capture.
-    cif1: Optional[CIF1Fields] = None
     # Optional list of additional CIF masks found after CIF0 mask.
     # Each entry is (cif_index, mask) for CIF1..CIF6 when present.
     cif_extra_masks: Optional[List[Tuple[int, int]]] = None
@@ -51,7 +47,6 @@ class ContextPacket:
         integer_seconds: Optional[int] = None,
         fractional_seconds: Optional[int] = None,
         cif0: Optional[CIF0Fields] = None,
-        cif1: Optional[CIF1Fields] = None,
         trailer: Optional[int] = None,
         cif_extra_masks: Optional[List[Tuple[int, int]]] = None,
         psi: Optional[int] = None,
@@ -77,7 +72,6 @@ class ContextPacket:
         self.integer_seconds = integer_seconds
         self.fractional_seconds = fractional_seconds
         self.cif0 = cif0
-        self.cif1 = cif1
         self.cif_extra_masks = cif_extra_masks
         self.trailer = trailer
 
@@ -121,8 +115,6 @@ class ContextPacket:
         # CIF summary
         if self.cif0 is not None:
             parts.append(f"cif0={self.cif0}")
-        if self.cif1 is not None:
-            parts.append("cif1=True")
         if self.cif_extra_masks:
             masks_summ = ", ".join(f"CIF{i}:{m & 0xFFFFFFFF:#010x}" for i, m in self.cif_extra_masks)
             parts.append(f"extra_masks=[{masks_summ}]")
@@ -174,7 +166,6 @@ class ContextPacket:
 
         # Best-effort parse of CIF0/CIF1 where possible.
         parsed_cif0: Optional[CIF0Fields] = None
-        parsed_cif1: Optional[CIF1Fields] = None
         extra_masks: List[Tuple[int, int]] = []
 
         if p_words:
@@ -201,7 +192,6 @@ class ContextPacket:
             integer_seconds=common.integer_seconds,
             fractional_seconds=common.fractional_seconds,
             cif0=parsed_cif0,
-            cif1=parsed_cif1,
             cif_extra_masks=extra_masks if extra_masks else None,
             trailer=trailer,
         )
