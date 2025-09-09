@@ -116,11 +116,10 @@ class ContextPacket:
         for i in range(1, 7): # CIF1 - CIF6 are not supported, we just ignore them
             if (cif0_mask & (1 << i)) != 0:
                 w_idx += 1
+                print(f"Ignore CIF{i} because currently not supported")
 
         # Parse CIF0 fields from remaining words
         parsed_cif0, used_field_words0 = CIF0Fields.parse_from_mask(cif0_mask, p_words[w_idx:])
-        w_fields_idx = w_idx + used_field_words0
-
 
 
 

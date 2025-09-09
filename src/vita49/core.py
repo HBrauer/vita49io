@@ -186,7 +186,6 @@ def _parse_common_from_words(words: List[int]) -> tuple[_Common, int, int]:
     t_present = hdr.trailer_present
     tsi = hdr.tsi
     tsf = hdr.tsf
-    pkt_cnt = hdr.packet_count
     pkt_size_words = hdr.packet_size
 
     if pkt_size_words != len(words):
