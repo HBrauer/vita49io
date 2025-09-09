@@ -165,14 +165,25 @@ class ContextPacket:
         p_words = words[idx:end_idx]
         trailer = common.trailer
 
-        # Convert payload words to bytes once for storage, then best-effort CIF0 parse.
-        payload = _payload_words_to_bytes(p_words)
+               # Best-effort parse of CIF0/CIF1 in the order:
+        # CIF0 word, CIF1 word (if enabled), CIF0 fields, CIF1 fields.
+        # Always preserve the original payload; attach parsed structures.
         parsed_cif0: Optional[CIF0Fields] = None
         parsed_cif1: Optional[CIF1Fields] = None
-        try:
-            parsed_cif0, _ = CIF0Fields.parse(payload)
-        except Exception:
-            parsed_cif0 = None
+
+        
+        cif0_mask = p_words[0]
+        w_idx = 1
+        for i in range(1, 7): # CIF1 - CIF6 are not supported, we just ignore them
+            if (cif0_mask & (1 << i)) != 0:
+                w_idx += 1
+                print(f"Ignore CIF{i} because currently not supported")
+
+        # Parse CIF0 fields from remaining words
+        parsed_cif0, used_field_words0 = CIF0Fields.parse_from_mask(cif0_mask, p_words[w_idx:])
+
+        # Convert payload words to bytes once for storage
+        payload = _payload_words_to_bytes(p_words)
         return ContextPacket(
             header=header,
             stream_id=common.stream_id,

@@ -97,6 +97,19 @@ class TestVitaExampleFilesRoundtrip(unittest.TestCase):
 
                 # Compare byte-for-byte
                 if original_bytes != check_bytes:
+                    # Persist the repacked bytes for debugging
+                    repo_root = os.path.dirname(os.path.dirname(__file__))
+                    artifacts_dir = os.path.join(repo_root, "tests", "_artifacts")
+                    os.makedirs(artifacts_dir, exist_ok=True)
+                    artifact_name = os.path.basename(path) + ".roundtrip"
+                    artifact_path = os.path.join(artifacts_dir, artifact_name)
+                    try:
+                        with open(artifact_path, "wb") as af:
+                            af.write(repacked)
+                    except Exception:
+                        # Do not mask the original assertion; saving is best-effort
+                        artifact_path = None
+
                     # Build helpful diff context
                     msg_parts = [f"Roundtrip mismatch for {os.path.basename(path)}"]
                     if len(original_bytes) != len(check_bytes):
@@ -116,5 +129,6 @@ class TestVitaExampleFilesRoundtrip(unittest.TestCase):
                         msg_parts.append(
                             f"first diff at offset {off}: src=0x{o:02X} dst=0x{c:02X}"
                         )
+                    if artifact_path:
+                        msg_parts.append(f"saved roundtrip to {artifact_path}")
                     self.fail("; ".join(msg_parts))
-
