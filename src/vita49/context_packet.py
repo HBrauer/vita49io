@@ -12,7 +12,6 @@ from .core import (
     _pack_common_prefix,
     _parse_common_from_words,
     _payload_bytes_to_words,
-    _payload_words_to_bytes,
     _unpack_u32_be,
     _u32,
 )
@@ -27,7 +26,6 @@ class ContextPacket:
     class_id: Optional[ClassID] = None
     integer_seconds: Optional[int] = None
     fractional_seconds: Optional[int] = None
-    payload: bytes = b""
     # Optional structured CIF0. If provided when packing, it takes precedence
     # over the raw `payload` field and will be encoded as the payload.
     cif0: Optional[CIF0Fields] = None
@@ -49,7 +47,6 @@ class ContextPacket:
         class_id: Optional[ClassID] = None,
         integer_seconds: Optional[int] = None,
         fractional_seconds: Optional[int] = None,
-        payload: bytes = b"",
         cif0: Optional[CIF0Fields] = None,
         cif1: Optional[CIF1Fields] = None,
         trailer: Optional[int] = None,
@@ -75,7 +72,6 @@ class ContextPacket:
         self.class_id = class_id
         self.integer_seconds = integer_seconds
         self.fractional_seconds = fractional_seconds
-        self.payload = payload
         self.cif0 = cif0
         self.cif1 = cif1
         self.trailer = trailer
@@ -117,8 +113,7 @@ class ContextPacket:
             parts.append(f"integer_seconds={self.integer_seconds}")
         if self.fractional_seconds is not None:
             parts.append(f"fractional_seconds={int(self.fractional_seconds)}")
-        # Payload and CIF0 summary
-        parts.append(f"payload_len={len(self.payload)}")
+        # CIF0/CIF1 summary
         if self.cif0 is not None:
             parts.append(f"cif0={self.cif0}")
         if self.cif1 is not None:
@@ -145,7 +140,11 @@ class ContextPacket:
         )
         words = _pack_common_prefix(common)
 
-        payload_bytes = self.cif0.pack() if self.cif0 is not None else self.payload
+        # Encode payload from CIF0 when provided; otherwise no payload.
+        if self.cif0 is not None:
+            payload_bytes = self.cif0.pack()
+        else:
+            payload_bytes = b""
         words.extend(_payload_bytes_to_words(payload_bytes))
         if self.trailer is not None:
             words.append(_u32(self.trailer))
@@ -165,32 +164,27 @@ class ContextPacket:
         p_words = words[idx:end_idx]
         trailer = common.trailer
 
-               # Best-effort parse of CIF0/CIF1 in the order:
-        # CIF0 word, CIF1 word (if enabled), CIF0 fields, CIF1 fields.
-        # Always preserve the original payload; attach parsed structures.
+        # Best-effort parse of CIF0/CIF1 where possible.
         parsed_cif0: Optional[CIF0Fields] = None
         parsed_cif1: Optional[CIF1Fields] = None
 
-        
-        cif0_mask = p_words[0]
-        w_idx = 1
-        for i in range(1, 7): # CIF1 - CIF6 are not supported, we just ignore them
-            if (cif0_mask & (1 << i)) != 0:
-                w_idx += 1
-                print(f"Ignore CIF{i} because currently not supported")
+        if p_words:
+            cif0_mask = p_words[0]
+            w_idx = 1
+            # Skip unsupported CIF1..CIF6 mask-only flags if present
+            for i in range(1, 7):  # CIF1 - CIF6 are not supported, we just ignore them
+                if (cif0_mask & (1 << i)) != 0:
+                    w_idx += 1
+                    print(f"Ignore CIF{i} because currently not supported")
+            # Parse CIF0 fields from remaining words
+            parsed_cif0, _used = CIF0Fields.parse_from_mask(cif0_mask, p_words[w_idx:])
 
-        # Parse CIF0 fields from remaining words
-        parsed_cif0, used_field_words0 = CIF0Fields.parse_from_mask(cif0_mask, p_words[w_idx:])
-
-        # Convert payload words to bytes once for storage
-        payload = _payload_words_to_bytes(p_words)
         return ContextPacket(
             header=header,
             stream_id=common.stream_id,
             class_id=common.class_id,
             integer_seconds=common.integer_seconds,
             fractional_seconds=common.fractional_seconds,
-            payload=payload,
             cif0=parsed_cif0,
             cif1=parsed_cif1,
             trailer=trailer,
