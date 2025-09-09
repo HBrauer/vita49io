@@ -20,7 +20,7 @@ from .vrt_types import ClassID
 from .cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
 
 
-@dataclass
+@dataclass(init=False)
 class DataPacket:
     header: Header
     stream_id: Optional[int] = None
@@ -33,6 +33,70 @@ class DataPacket:
     # is provided to parse(). Not serialized unless pack() is called with a
     # compatible payload_format.
     iq: Optional["np.ndarray"] = None
+
+    def __init__(
+        self,
+        *,
+        # Either provide a ready Header or supply header fields below
+        header: Optional[Header] = None,
+        packet_type: Optional[PacketType] = None,
+        packet_specific_indicators: int = 0,
+        tsi: TSI = TSI.NONE,
+        tsf: TSF = TSF.NONE,
+        packet_count: int = 0,
+        # Common fields
+        stream_id: Optional[int] = None,
+        class_id: Optional[ClassID] = None,
+        integer_seconds: Optional[int] = None,
+        fractional_seconds: Optional[int] = None,
+        payload: bytes = b"",
+        trailer: Optional[int] = None,
+        # Optional decoded IQ
+        iq: Optional["np.ndarray"] = None,
+        # Backwards-compat alias (psi)
+        psi: Optional[int] = None,
+    ) -> None:
+        if header is None:
+            if packet_type is None:
+                raise TypeError("Either header or packet_type must be provided")
+            if psi is not None:
+                packet_specific_indicators = int(psi)
+            # packet_size is computed during pack()
+            header = Header(
+                packet_type=packet_type,
+                class_id_present=(class_id is not None),
+                trailer_present=(trailer is not None),
+                packet_specific_indicators=int(packet_specific_indicators),
+                tsi=tsi,
+                tsf=tsf,
+                packet_count=int(packet_count),
+                packet_size=0,
+            )
+        self.header = header
+        self.stream_id = stream_id
+        self.class_id = class_id
+        self.integer_seconds = integer_seconds
+        self.fractional_seconds = fractional_seconds
+        self.payload = payload
+        self.trailer = trailer
+        self.iq = iq
+
+    # Thin convenience accessors expected by tests/users
+    @property
+    def packet_type(self) -> PacketType:
+        return self.header.packet_type
+
+    @property
+    def tsi(self) -> TSI:
+        return self.header.tsi
+
+    @property
+    def tsf(self) -> TSF:
+        return self.header.tsf
+
+    @property
+    def packet_count(self) -> int:
+        return self.header.packet_count
 
     def __repr__(self) -> str:  # pragma: no cover - human-facing formatting
         def _hex32(v: int) -> str:

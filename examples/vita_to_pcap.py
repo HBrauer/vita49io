@@ -125,16 +125,22 @@ def vita_to_pcap(
                         new_pc = (start_cnt + seg_index) & 0xF
 
                         dp_seg = DataPacket(
-                            packet_type=dp.packet_type,
+                            header=Header(
+                                packet_type=h.packet_type,
+                                class_id_present=dp.class_id is not None,
+                                trailer_present=new_trailer is not None,
+                                packet_specific_indicators=0,
+                                tsi=h.tsi,
+                                tsf=h.tsf,
+                                packet_count=new_pc,
+                                packet_size=0,
+                            ),
                             stream_id=dp.stream_id,
                             class_id=dp.class_id,
-                            tsi=dp.tsi,
-                            tsf=dp.tsf,
                             integer_seconds=dp.integer_seconds,
                             fractional_seconds=dp.fractional_seconds,
                             payload=chunk,
                             trailer=new_trailer,
-                            packet_count=new_pc,
                             iq=None,
                         )
                         seg_bytes = dp_seg.pack()

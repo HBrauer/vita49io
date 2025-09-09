@@ -20,7 +20,7 @@ from .enums import PacketType, TSI, TSF
 from .vrt_types import ClassID
 
 
-@dataclass
+@dataclass(init=False)
 class ContextPacket:
     header: Header
     stream_id: Optional[int] = None
@@ -35,6 +35,67 @@ class ContextPacket:
     # by the library; this is provided to indicate presence and raw capture.
     cif1: Optional[CIF1Fields] = None
     trailer: Optional[int] = None
+
+    def __init__(
+        self,
+        *,
+        header: Optional[Header] = None,
+        packet_type: Optional[PacketType] = None,
+        packet_specific_indicators: int = 0,
+        tsi: TSI = TSI.NONE,
+        tsf: TSF = TSF.NONE,
+        packet_count: int = 0,
+        stream_id: Optional[int] = None,
+        class_id: Optional[ClassID] = None,
+        integer_seconds: Optional[int] = None,
+        fractional_seconds: Optional[int] = None,
+        payload: bytes = b"",
+        cif0: Optional[CIF0Fields] = None,
+        cif1: Optional[CIF1Fields] = None,
+        trailer: Optional[int] = None,
+        psi: Optional[int] = None,
+    ) -> None:
+        if header is None:
+            if packet_type is None:
+                raise TypeError("Either header or packet_type must be provided")
+            if psi is not None:
+                packet_specific_indicators = int(psi)
+            header = Header(
+                packet_type=packet_type,
+                class_id_present=(class_id is not None),
+                trailer_present=(trailer is not None),
+                packet_specific_indicators=int(packet_specific_indicators),
+                tsi=tsi,
+                tsf=tsf,
+                packet_count=int(packet_count),
+                packet_size=0,
+            )
+        self.header = header
+        self.stream_id = stream_id
+        self.class_id = class_id
+        self.integer_seconds = integer_seconds
+        self.fractional_seconds = fractional_seconds
+        self.payload = payload
+        self.cif0 = cif0
+        self.cif1 = cif1
+        self.trailer = trailer
+
+    # Convenience accessors expected by tests/users
+    @property
+    def packet_type(self) -> PacketType:
+        return self.header.packet_type
+
+    @property
+    def tsi(self) -> TSI:
+        return self.header.tsi
+
+    @property
+    def tsf(self) -> TSF:
+        return self.header.tsf
+
+    @property
+    def packet_count(self) -> int:
+        return self.header.packet_count
 
     def __repr__(self) -> str:  # pragma: no cover - human-facing formatting
         def _hex32(v: int) -> str:
@@ -104,28 +165,14 @@ class ContextPacket:
         p_words = words[idx:end_idx]
         trailer = common.trailer
 
-        # Best-effort parse of CIF0/CIF1 in the order:
-        # CIF0 word, CIF1 word (if enabled), CIF0 fields, CIF1 fields.
-        # Always preserve the original payload; attach parsed structures.
+        # Convert payload words to bytes once for storage, then best-effort CIF0 parse.
+        payload = _payload_words_to_bytes(p_words)
         parsed_cif0: Optional[CIF0Fields] = None
         parsed_cif1: Optional[CIF1Fields] = None
-
-        
-        cif0_mask = p_words[0]
-        w_idx = 1
-        for i in range(1, 7): # CIF1 - CIF6 are not supported, we just ignore them
-            if (cif0_mask & (1 << i)) != 0:
-                w_idx += 1
-                print(f"Ignore CIF{i} because currently not supported")
-
-        # Parse CIF0 fields from remaining words
-        parsed_cif0, used_field_words0 = CIF0Fields.parse_from_mask(cif0_mask, p_words[w_idx:])
-
-
-
-
-        # Convert payload words to bytes once for storage
-        payload = _payload_words_to_bytes(p_words)
+        try:
+            parsed_cif0, _ = CIF0Fields.parse(payload)
+        except Exception:
+            parsed_cif0 = None
         return ContextPacket(
             header=header,
             stream_id=common.stream_id,

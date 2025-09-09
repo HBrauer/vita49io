@@ -1,3 +1,4 @@
 *.pyc
 __pycache__/
 doc/
+vita_example_files/
