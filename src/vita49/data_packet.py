@@ -53,14 +53,10 @@ class DataPacket:
         trailer: Optional[int] = None,
         # Optional decoded IQ
         iq: Optional["np.ndarray"] = None,
-        # Backwards-compat alias (psi)
-        psi: Optional[int] = None,
     ) -> None:
         if header is None:
             if packet_type is None:
                 raise TypeError("Either header or packet_type must be provided")
-            if psi is not None:
-                packet_specific_indicators = int(psi)
             # packet_size is computed during pack()
             header = Header(
                 packet_type=packet_type,

@@ -192,9 +192,13 @@ class CIF0Fields:
     # Decoded helper (not part of on-wire format). If provided when packing
     # and raw tuple is None, it will be used to generate the two words.
     payload_format: Optional[PayloadFormat] = None
+    # Raw presence bits 14..0 preserved as-is (no additional words handled)
+    raw_low_bits: int = 0
 
     def _presence_mask(self) -> int:
         m = 0
+        # Include raw low bits (14..0) as-is
+        m |= (self.raw_low_bits & 0x7FFF)
         if self.context_field_change_indicator:
             m |= 1 << 31
         if self.reference_point_identifier is not None:
@@ -296,10 +300,7 @@ class CIF0Fields:
         """
 
         # Reject unsupported lower bits explicitly requested by caller
-        unsupported_bits = [14, 13, 12, 11, 10, 9, 8, 7, 1, 0]
-        bad = [b for b in unsupported_bits if (mask >> b) & 1]
-        if bad:
-            print(f"WARNING: Unsupported CIF0 fields present (presence bits set): {bad} {bin(mask)}. Further reading might fail. ")
+        # Preserve raw lower bits (14..0) without attempting to parse them
             
 
         idx = 0
@@ -312,6 +313,8 @@ class CIF0Fields:
         f = CIF0Fields()
 
         f.context_field_change_indicator = bool(mask & (1 << 31))
+        # Save raw low bits 14..0
+        f.raw_low_bits = mask & 0x7FFF
         if mask & (1 << 30):
             need(1)
             f.reference_point_identifier = field_words[idx]

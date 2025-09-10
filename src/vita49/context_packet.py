@@ -51,13 +51,10 @@ class ContextPacket:
         trailer: Optional[int] = None,
         cif_extra_masks: Optional[List[Tuple[int, int]]] = None,
         raw_cif_fields: Optional[List[int]] = None,
-        psi: Optional[int] = None,
     ) -> None:
         if header is None:
             if packet_type is None:
                 raise TypeError("Either header or packet_type must be provided")
-            if psi is not None:
-                packet_specific_indicators = int(psi)
             header = Header(
                 packet_type=packet_type,
                 class_id_present=(class_id is not None),
@@ -217,4 +214,3 @@ class ContextPacket:
         )
 
 __all__ = ["ContextPacket"]
-
