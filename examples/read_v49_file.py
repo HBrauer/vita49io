@@ -22,11 +22,11 @@ def read_all_packets(path: str):
     subsequent data packets (I/Q extraction when compatible).
     Yields parsed packet objects.
     """
-    from vita49.core import Header
-    from vita49.enums import PacketType
-    from vita49.data_packet import DataPacket
-    from vita49.context_packet import ContextPacket
-    from vita49.cif0 import PayloadFormat
+    from vita49.protocol.core import Header
+    from vita49.protocol.enums import PacketType
+    from vita49.protocol.data_packet import DataPacket
+    from vita49.protocol.context_packet import ContextPacket
+    from vita49.protocol.cif0 import PayloadFormat
 
     last_payload_format: Optional[PayloadFormat] = None
 

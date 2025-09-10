@@ -235,6 +235,7 @@ __all__ = ["DataPacket"]
 # Internal helpers (IQ I/O)
 # --------------------------
 
+
 def _validate_supported(pf: PayloadFormat) -> Tuple[int, int, DataItemFormat]:
     if pf.packing_method != PackingMethod.PROCESSING_EFFICIENT:
         raise ValueError("Unsupported packing method: only Processing-efficient is supported")
@@ -409,3 +410,4 @@ def _encode_iq_payload(iq: "np.ndarray", pf: PayloadFormat) -> bytes:
     # ipf == 32 here; pack lower di bits of 32-bit field
     fields32 = (uvals & ((1 << di) - 1)).astype(np.uint32)
     return fields32.astype(">u4").tobytes()
+

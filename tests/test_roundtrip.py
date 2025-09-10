@@ -117,7 +117,7 @@ class TestVRT(unittest.TestCase):
     def test_iq_roundtrip_all_supported_payload_formats(self):
         # Validate encode/decode of IQ using every supported PayloadFormat combination
         import numpy as np
-        from vita49.cif0 import (
+        from vita49.protocol.cif0 import (
             PayloadFormat,
             PackingMethod,
             SampleType,

@@ -20,11 +20,11 @@ def read_packets_with_iq(path: str):
     Keeps track of the last CIF0 payload format, which enables IQ decoding
     in DataPacket.parse(). Also extracts sample_rate_hz from CIF0 when present.
     """
-    from vita49.core import Header
-    from vita49.enums import PacketType
-    from vita49.data_packet import DataPacket
-    from vita49.context_packet import ContextPacket
-    from vita49.cif0 import PayloadFormat
+    from vita49.protocol.core import Header
+    from vita49.protocol.enums import PacketType
+    from vita49.protocol.data_packet import DataPacket
+    from vita49.protocol.context_packet import ContextPacket
+    from vita49.protocol.cif0 import PayloadFormat
 
     last_payload_format: Optional[PayloadFormat] = None
     last_sample_rate_hz: Optional[float] = None

@@ -414,8 +414,6 @@ class CIF0Fields:
         return f, (1 + used_field_words) * 4
 
 
-
-
 __all__ = [
     "CIF0Fields",
     "PayloadFormat",
@@ -423,3 +421,4 @@ __all__ = [
     "SampleType",
     "DataItemFormat",
 ]
+
