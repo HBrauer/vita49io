@@ -32,14 +32,12 @@ class ContextPacket:
     cif_extra_masks: Optional[List[Tuple[int, int]]] = None
     # Raw CIF field words (after CIF0 fields), as 32-bit words
     raw_cif_fields: Optional[List[int]] = None
-    trailer: Optional[int] = None
 
     def __init__(
         self,
         *,
         header: Optional[Header] = None,
         packet_type: Optional[PacketType] = None,
-        packet_specific_indicators: int = 0,
         tsi: TSI = TSI.NONE,
         tsf: TSF = TSF.NONE,
         packet_count: int = 0,
@@ -48,7 +46,6 @@ class ContextPacket:
         integer_seconds: Optional[int] = None,
         fractional_seconds: Optional[int] = None,
         cif0: CIF0Fields,
-        trailer: Optional[int] = None,
         cif_extra_masks: Optional[List[Tuple[int, int]]] = None,
         raw_cif_fields: Optional[List[int]] = None,
     ) -> None:
@@ -58,8 +55,8 @@ class ContextPacket:
             header = Header(
                 packet_type=packet_type,
                 class_id_present=(class_id is not None),
-                trailer_present=(trailer is not None),
-                packet_specific_indicators=int(packet_specific_indicators),
+                # Trailer bit has no meaning for context packets
+                indicators_26=False,
                 tsi=tsi,
                 tsf=tsf,
                 packet_count=int(packet_count),
@@ -80,7 +77,6 @@ class ContextPacket:
             if raw_cif_fields is not None
             else None
         )
-        self.trailer = trailer
 
     # Convenience accessors expected by tests/users
     @property
@@ -124,9 +120,12 @@ class ContextPacket:
         if self.cif_extra_masks:
             masks_summ = ", ".join(f"CIF{i}:{m & 0xFFFFFFFF:#010x}" for i, m in self.cif_extra_masks)
             parts.append(f"extra_masks=[{masks_summ}]")
-        if self.trailer is not None:
-            parts.append(f"trailer={_hex32(self.trailer)}")
         parts.append(f"packet_count={self.header.packet_count}")
+        # Indicator bits (for debugging)
+        if self.header.indicators_25:
+            parts.append("indicators_25=True")
+        if self.header.indicators_24:
+            parts.append("indicators_24=True")
         return f"ContextPacket({', '.join(parts)})"
 
     def pack(self) -> bytes:
@@ -135,14 +134,14 @@ class ContextPacket:
         if self.stream_id is None:
             raise ValueError("ContextPacket requires a Stream ID")
 
-        # Build common prefix via _Common helper (stream_id ignored for context)
+        # Build common prefix via _Common helper (stream_id required for context)
         common = _Common(
             header=self.header,
             stream_id=self.stream_id,
             class_id=self.class_id,
             integer_seconds=self.integer_seconds,
             fractional_seconds=self.fractional_seconds,
-            trailer=self.trailer,
+            trailer=None,
         )
         words = _pack_common_prefix(common)
 
@@ -160,9 +159,6 @@ class ContextPacket:
         if self.raw_cif_fields:
             words.extend(self.raw_cif_fields)
 
-       
-        if self.trailer is not None:
-            words.append(_u32(self.trailer))
         return _finalize_words_to_bytes(words)
 
     @staticmethod
@@ -177,7 +173,6 @@ class ContextPacket:
 
         # Work with payload as words directly to avoid redundant conversions.
         p_words = words[idx:end_idx]
-        trailer = common.trailer
 
         # Best-effort parse of CIF masks and CIF0 fields; capture remaining raw CIF fields.
         parsed_cif0: Optional[CIF0Fields] = None
@@ -210,7 +205,6 @@ class ContextPacket:
             cif0=parsed_cif0,
             cif_extra_masks=extra_masks if extra_masks else None,
             raw_cif_fields=raw_cif_fields,
-            trailer=trailer,
         )
 
 __all__ = ["ContextPacket"]

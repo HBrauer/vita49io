@@ -27,7 +27,7 @@ class TestVRT(unittest.TestCase):
         self.assertEqual(q.payload, b"\xDE\xAD\xBE\xEF\x00\x11\x22\x33")
         self.assertEqual(q.packet_count, 7)
 
-    def test_with_class_id_and_trailer(self):
+    def test_with_class_id_and_no_trailer(self):
         # Raw CIF fields to carry alongside CIF0 (1 word)
         extra_bytes = b"\x01\x02\x03\x04"
         extra_word = int.from_bytes(extra_bytes, byteorder="big")
@@ -39,7 +39,6 @@ class TestVRT(unittest.TestCase):
             tsf=TSF.NONE,
             cif0=CIF0Fields(),
             raw_cif_fields=[extra_word],
-            trailer=0xCAFEBABE,
         )
         b = p.pack()
         q = ContextPacket.parse(b)
@@ -52,7 +51,9 @@ class TestVRT(unittest.TestCase):
         self.assertIsNotNone(q.raw_cif_fields)
         got_bytes = b"".join(int(w).to_bytes(4, byteorder="big") for w in q.raw_cif_fields)
         self.assertEqual(got_bytes, extra_bytes)
-        self.assertEqual(q.trailer, 0xCAFEBABE)
+        # Context packets have no trailer; bit has no meaning
+        # Ensure no trailer attribute/field is present
+        self.assertFalse(hasattr(q, "trailer"))
 
     def test_data_header_roundtrip_all_types_tsi_tsf(self):
         # Exercise all data packet types with and without timestamps

@@ -7,11 +7,14 @@ from .enums import PacketType, TSI, TSF
 from .vrt_types import ClassID
 
 
-# Header bit masks (based on common VITA 49.0 usage)
+# Header bit masks (based on VITA 49.x)
 _HDR_PACKET_TYPE_MASK = 0xF0000000
 _HDR_C_MASK = 0x08000000  # Class ID present
 _HDR_T_MASK = 0x04000000  # Trailer present
-_HDR_PSI_MASK = 0x03000000  # Packet Specific Indicators (bits 25-24)
+# Packet Specific Indicators are 3 bits (bits 26-24). Note: bit 26 overlaps
+# with the Trailer Present indicator for data packets. We model bit 26 via
+# trailer_present and bits 25 and 24 as separate booleans in Header.
+_HDR_PSI_MASK = 0x07000000  # Bits 26-24
 _HDR_TSI_MASK = 0x00C00000  # 2 bits
 _HDR_TSF_MASK = 0x00300000  # 2 bits
 _HDR_PKT_CNT_MASK = 0x000F0000  # 4 bits
@@ -48,16 +51,16 @@ def _payload_words_to_bytes(words: List[int]) -> bytes:
 class Header:
     packet_type: PacketType
     class_id_present: bool = False
-    trailer_present: bool = False
-    packet_specific_indicators: int = 0  # 2 bits (bits 25-24)
+    # Packet Specific Indicator bits by number for clarity
+    indicators_26: bool = False  # Trailer Included for data packets; ignored for context
+    indicators_25: bool = False  # If true, this is a V49.2 packet and not a valid V49.0 Packet
+    indicators_24: bool = False  # Data packet: False - Time Data, True - Spectrum Data; Context packet (Timestamp Mode (TSM) bit): False - precise timing, True - general timing 
     tsi: TSI = TSI.NONE
     tsf: TSF = TSF.NONE
     packet_count: int = 0  # 4 bits
     packet_size: int = 0  # total words
 
     def pack(self) -> int:
-        if not (0 <= self.packet_specific_indicators <= 3):
-            raise ValueError("packet_specific_indicators must be in 0..3")
         if not (0 <= self.packet_count <= 0xF):
             raise ValueError("packet_count must be in 0..15")
         if not (0 <= self.packet_size <= 0xFFFF):
@@ -67,9 +70,14 @@ class Header:
         w0 |= (int(self.packet_type) & 0xF) << 28
         if self.class_id_present:
             w0 |= _HDR_C_MASK
-        if self.trailer_present:
+        # Bit 26
+        if self.indicators_26:
             w0 |= _HDR_T_MASK
-        w0 |= (self.packet_specific_indicators & 0x3) << 24
+        # Bits 25 and 24
+        if self.indicators_25:
+            w0 |= (1 << 25)
+        if self.indicators_24:
+            w0 |= (1 << 24)
         w0 |= (int(self.tsi) & 0x3) << 22
         w0 |= (int(self.tsf) & 0x3) << 20
         w0 |= (self.packet_count & 0xF) << 16
@@ -80,9 +88,12 @@ class Header:
         parts: list[str] = []
         parts.append(f"packet_type={self.packet_type.name}")
         parts.append(f"class_id_present={self.class_id_present}")
-        parts.append(f"trailer_present={self.trailer_present}")
-        if self.packet_specific_indicators:
-            parts.append(f"psi={self.packet_specific_indicators}")
+        if self.indicators_26:
+            parts.append("indicators_26=True")
+        if self.indicators_25:
+            parts.append("indicators_25=True")
+        if self.indicators_24:
+            parts.append("indicators_24=True")
         if self.tsi != TSI.NONE:
             parts.append(f"tsi={self.tsi.name}")
         if self.tsf != TSF.NONE:
@@ -95,8 +106,14 @@ class Header:
     def parse(w0: int) -> "Header":
         pkt_type = PacketType((w0 & _HDR_PACKET_TYPE_MASK) >> 28)
         c_present = bool(w0 & _HDR_C_MASK)
-        t_present = bool(w0 & _HDR_T_MASK)
-        psi = (w0 & _HDR_PSI_MASK) >> 24
+        # Per VITA 49.0, the bit 26 applies to data packets (Trailer Included).
+        # For context packets, this bit has no defined meaning and is ignored.
+        ind26 = bool(w0 & _HDR_T_MASK)
+        if pkt_type == PacketType.CONTEXT_PACKET:
+            ind26 = False
+        psi_bits = (w0 & _HDR_PSI_MASK) >> 24
+        ind25 = bool(psi_bits & 0b010)
+        ind24 = bool(psi_bits & 0b001)
         tsi = TSI((w0 & _HDR_TSI_MASK) >> 22)
         tsf = TSF((w0 & _HDR_TSF_MASK) >> 20)
         pkt_cnt = (w0 & _HDR_PKT_CNT_MASK) >> 16
@@ -104,8 +121,9 @@ class Header:
         return Header(
             packet_type=pkt_type,
             class_id_present=c_present,
-            trailer_present=t_present,
-            packet_specific_indicators=int(psi),
+            indicators_26=ind26,
+            indicators_25=ind25,
+            indicators_24=ind24,
             tsi=tsi,
             tsf=tsf,
             packet_count=int(pkt_cnt),
@@ -129,8 +147,20 @@ def _pack_common_prefix(c: _Common) -> List[int]:
     hdr = Header(
         packet_type=c.header.packet_type,
         class_id_present=c.class_id is not None,
-        trailer_present=c.trailer is not None,
-        packet_specific_indicators=c.header.packet_specific_indicators,
+        # indicators_26 is only defined for data packets; ignore for context packets.
+        indicators_26=(
+            c.trailer is not None
+            and c.header.packet_type
+            in (
+                PacketType.IF_DATA_WITHOUT_STREAM_ID,
+                PacketType.IF_DATA_WITH_STREAM_ID,
+                PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
+                PacketType.EXTENSION_DATA_WITH_STREAM_ID,
+            )
+        ),
+        # Preserve indicator bits 25 and 24 from the input header
+        indicators_25=c.header.indicators_25,
+        indicators_24=c.header.indicators_24,
         tsi=c.header.tsi,
         tsf=c.header.tsf,
         packet_count=c.header.packet_count,
@@ -183,7 +213,7 @@ def _parse_common_from_words(words: List[int]) -> tuple[_Common, int, int]:
     hdr = Header.parse(words[0])
     pkt_type = hdr.packet_type
     c_present = hdr.class_id_present
-    t_present = hdr.trailer_present
+    t_present = hdr.indicators_26
     tsi = hdr.tsi
     tsf = hdr.tsf
     pkt_size_words = hdr.packet_size
@@ -266,4 +296,3 @@ __all__ = [
     "_finalize_words_to_bytes",
     "_parse_common_from_words",
 ]
-

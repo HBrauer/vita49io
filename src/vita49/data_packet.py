@@ -40,7 +40,6 @@ class DataPacket:
         # Either provide a ready Header or supply header fields below
         header: Optional[Header] = None,
         packet_type: Optional[PacketType] = None,
-        packet_specific_indicators: int = 0,
         tsi: TSI = TSI.NONE,
         tsf: TSF = TSF.NONE,
         packet_count: int = 0,
@@ -61,8 +60,7 @@ class DataPacket:
             header = Header(
                 packet_type=packet_type,
                 class_id_present=(class_id is not None),
-                trailer_present=(trailer is not None),
-                packet_specific_indicators=int(packet_specific_indicators),
+                # indicators_26 is derived during packing for data packets based on trailer presence
                 tsi=tsi,
                 tsf=tsf,
                 packet_count=int(packet_count),
@@ -76,6 +74,16 @@ class DataPacket:
         self.payload = payload
         self.trailer = trailer
         self.iq = iq
+
+        # No indicators are exposed on the packet API; if needed, set on Header directly
+        # Keep header.indicators_26 consistent with trailer presence for data packets
+        if self.header.packet_type in (
+            PacketType.IF_DATA_WITHOUT_STREAM_ID,
+            PacketType.IF_DATA_WITH_STREAM_ID,
+            PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
+            PacketType.EXTENSION_DATA_WITH_STREAM_ID,
+        ):
+            self.header.indicators_26 = self.trailer is not None
 
     # Thin convenience accessors expected by tests/users
     @property
@@ -122,6 +130,11 @@ class DataPacket:
             parts.append(f"trailer={_hex32(self.trailer)}")
         # Show packet count always for debugging sequences
         parts.append(f"packet_count={self.header.packet_count}")
+        # Indicator bits (for debugging)
+        if self.header.indicators_25:
+            parts.append("indicators_25=True")
+        if self.header.indicators_24:
+            parts.append("indicators_24=True")
         # If IQ present, summarize size without importing numpy
         if self.iq is not None:
             n = None

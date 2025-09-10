@@ -67,10 +67,11 @@ class TestVitaExampleFilesRoundtrip(unittest.TestCase):
         self.assertTrue(os.path.isdir(examples_dir), "Missing vita_example_files directory")
 
         # Collect files (any regular files under the directory)
+        # Only process raw VITA 49 files, not PCAP containers
         files = [
             os.path.join(examples_dir, name)
             for name in os.listdir(examples_dir)
-            if os.path.isfile(os.path.join(examples_dir, name))
+            if os.path.isfile(os.path.join(examples_dir, name)) and name.endswith(".vita49")
         ]
 
         self.assertTrue(files, "No files found in vita_example_files")
