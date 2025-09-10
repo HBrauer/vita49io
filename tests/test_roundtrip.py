@@ -1,6 +1,6 @@
 import unittest
 
-from vita49 import DataPacket, ContextPacket, PacketType, TSI, TSF, CIF0Fields
+from vita49io import DataPacket, ContextPacket, PacketType, TSI, TSF, CIF0Fields
 
 
 class TestVRT(unittest.TestCase):
@@ -57,7 +57,7 @@ class TestVRT(unittest.TestCase):
 
     def test_data_header_roundtrip_all_types_tsi_tsf(self):
         # Exercise all data packet types with and without timestamps
-        from vita49 import PacketType, TSI, TSF, DataPacket
+        from vita49io import PacketType, TSI, TSF, DataPacket
 
         pkt_types = [
             PacketType.IF_DATA_WITHOUT_STREAM_ID,
@@ -117,7 +117,7 @@ class TestVRT(unittest.TestCase):
     def test_iq_roundtrip_all_supported_payload_formats(self):
         # Validate encode/decode of IQ using every supported PayloadFormat combination
         import numpy as np
-        from vita49.protocol.cif0 import (
+        from vita49io.protocol.cif0 import (
             PayloadFormat,
             PackingMethod,
             SampleType,

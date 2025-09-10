@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 import numpy as np
 
-from vita49.io import IQStreamWriter
+from vita49io.io import IQStreamWriter
 
 
 def main(argv: list[str]) -> int:
@@ -62,4 +62,3 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv))
-

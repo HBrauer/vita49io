@@ -15,7 +15,7 @@ Usage
 -----
 
 ```python
-from vita49 import Packet, PacketType, TSI, TSF
+from vita49io import Packet, PacketType, TSI, TSF
 
 # Build a minimal IF Data packet with stream ID and timestamps
 p = Packet(
@@ -41,4 +41,3 @@ Notes
 - Class ID is represented as (oui, information_class, packet_class).
 - Trailer is parsed/serialized as a raw 32-bit word for now.
 - This library targets VITA 49.2 common header layout. Some advanced/optional fields may be added later.
-

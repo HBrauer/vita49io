@@ -1,5 +1,5 @@
 Metadata-Version: 2.4
-Name: vita49
+Name: vita49io
 Version: 0.1.0
 Summary: VITA 49 (VRT) packet read/write utilities
 Author: Your Name
@@ -24,7 +24,7 @@ Usage
 -----
 
 ```python
-from vita49 import Packet, PacketType, TSI, TSF
+from vita49io import Packet, PacketType, TSI, TSF
 
 # Build a minimal IF Data packet with stream ID and timestamps
 p = Packet(

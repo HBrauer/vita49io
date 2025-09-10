@@ -4,7 +4,7 @@ This subpackage contains the core data structures and helpers
 that implement the VITA 49 (VRT) protocol.
 """
 
-# Re-export common types for convenience when importing from vita49.protocol
+# Re-export common types for convenience when importing from vita49io.protocol
 from .data_packet import DataPacket  # noqa: F401
 from .context_packet import ContextPacket  # noqa: F401
 from .enums import PacketType, TSI, TSF  # noqa: F401
@@ -24,4 +24,3 @@ __all__ = [
     "SampleType",
     "DataItemFormat",
 ]
-

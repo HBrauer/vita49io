@@ -3,10 +3,10 @@ import io
 import tempfile
 import unittest
 
-from vita49.protocol.core import Header
-from vita49.protocol.enums import PacketType
-from vita49.protocol.data_packet import DataPacket
-from vita49.protocol.context_packet import ContextPacket
+from vita49io.protocol.core import Header
+from vita49io.protocol.enums import PacketType
+from vita49io.protocol.data_packet import DataPacket
+from vita49io.protocol.context_packet import ContextPacket
 
 
 def _iter_packets(path: str):

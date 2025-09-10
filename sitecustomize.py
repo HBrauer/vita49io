@@ -3,7 +3,7 @@ Test/development helper to ensure the src/ layout is importable.
 
 Python automatically imports this module (if present on sys.path) after
 standard site initialization. By adding the repository's `src` directory to
-`sys.path`, `import vita49` works without installing the package.
+`sys.path`, `import vita49io` works without installing the package.
 
 This has no effect in production installs (where the package is installed),
 and is safe to keep in the repo.
@@ -19,4 +19,3 @@ try:
 except Exception:
     # Non-fatal: tests may still configure PYTHONPATH or use installed package
     pass
-

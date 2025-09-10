@@ -1,6 +1,6 @@
 import unittest
 
-from vita49 import ContextPacket, PacketType, TSI, TSF, CIF0Fields
+from vita49io import ContextPacket, PacketType, TSI, TSF, CIF0Fields
 
 
 class TestCIF0(unittest.TestCase):
