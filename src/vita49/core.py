@@ -10,10 +10,7 @@ from .vrt_types import ClassID
 # Header bit masks (based on VITA 49.x)
 _HDR_PACKET_TYPE_MASK = 0xF0000000
 _HDR_C_MASK = 0x08000000  # Class ID present
-_HDR_T_MASK = 0x04000000  # Trailer present
-# Packet Specific Indicators are 3 bits (bits 26-24). Note: bit 26 overlaps
-# with the Trailer Present indicator for data packets. We model bit 26 via
-# trailer_present and bits 25 and 24 as separate booleans in Header.
+# Packet Specific Indicators (PSI) are 3 bits (26-24). Treat bits 26, 25 and 24 uniformly.
 _HDR_PSI_MASK = 0x07000000  # Bits 26-24
 _HDR_TSI_MASK = 0x00C00000  # 2 bits
 _HDR_TSF_MASK = 0x00300000  # 2 bits
@@ -51,8 +48,8 @@ def _payload_words_to_bytes(words: List[int]) -> bytes:
 class Header:
     packet_type: PacketType
     class_id_present: bool = False
-    # Packet Specific Indicator bits by number for clarity
-    indicators_26: bool = False  # Trailer Included for data packets; ignored for context
+    # Packet Specific Indicator bits (26, 25, 24)
+    indicators_26: bool = False  # If true, data packet has trailer, no meaning for context packet
     indicators_25: bool = False  # If true, this is a V49.2 packet and not a valid V49.0 Packet
     indicators_24: bool = False  # Data packet: False - Time Data, True - Spectrum Data; Context packet (Timestamp Mode (TSM) bit): False - precise timing, True - general timing 
     tsi: TSI = TSI.NONE
@@ -70,14 +67,13 @@ class Header:
         w0 |= (int(self.packet_type) & 0xF) << 28
         if self.class_id_present:
             w0 |= _HDR_C_MASK
-        # Bit 26
-        if self.indicators_26:
-            w0 |= _HDR_T_MASK
-        # Bits 25 and 24
-        if self.indicators_25:
-            w0 |= (1 << 25)
-        if self.indicators_24:
-            w0 |= (1 << 24)
+        # Packet Specific Indicators (bits 26-24) packed uniformly
+        psi = (
+            (1 if self.indicators_26 else 0) << 2
+            | (1 if self.indicators_25 else 0) << 1
+            | (1 if self.indicators_24 else 0)
+        )
+        w0 |= (psi & 0x7) << 24
         w0 |= (int(self.tsi) & 0x3) << 22
         w0 |= (int(self.tsf) & 0x3) << 20
         w0 |= (self.packet_count & 0xF) << 16
@@ -106,12 +102,9 @@ class Header:
     def parse(w0: int) -> "Header":
         pkt_type = PacketType((w0 & _HDR_PACKET_TYPE_MASK) >> 28)
         c_present = bool(w0 & _HDR_C_MASK)
-        # Per VITA 49.0, the bit 26 applies to data packets (Trailer Included).
-        # For context packets, this bit has no defined meaning and is ignored.
-        ind26 = bool(w0 & _HDR_T_MASK)
-        if pkt_type == PacketType.CONTEXT_PACKET:
-            ind26 = False
+        # Parse Packet Specific Indicators uniformly from bits 26-24
         psi_bits = (w0 & _HDR_PSI_MASK) >> 24
+        ind26 = bool(psi_bits & 0b100)
         ind25 = bool(psi_bits & 0b010)
         ind24 = bool(psi_bits & 0b001)
         tsi = TSI((w0 & _HDR_TSI_MASK) >> 22)

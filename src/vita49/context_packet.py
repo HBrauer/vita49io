@@ -57,8 +57,6 @@ class ContextPacket:
             header = Header(
                 packet_type=packet_type,
                 class_id_present=(class_id is not None),
-                # Trailer bit has no meaning for context packets
-                indicators_26=False,
                 indicators_25=bool(requiresVita49_2),
                 tsi=tsi,
                 tsf=tsf,
