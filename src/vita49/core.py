@@ -146,7 +146,7 @@ def _pack_common_prefix(c: _Common) -> List[int]:
     hdr = Header(
         packet_type=c.header.packet_type,
         class_id_present=c.class_id is not None,
-        indicators_26=c.header.indicators_25,
+        indicators_26=c.header.indicators_26,
         indicators_25=c.header.indicators_25,
         indicators_24=c.header.indicators_24,
         tsi=c.header.tsi,

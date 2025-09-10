@@ -52,6 +52,8 @@ class DataPacket:
         trailer: Optional[int] = None,
         # Optional decoded IQ
         iq: Optional["np.ndarray"] = None,
+        # If true, set header.indicators_25 (V49.2-only packet)
+        requiresVita49_2: bool = False,
     ) -> None:
         if header is None:
             if packet_type is None:
@@ -61,6 +63,7 @@ class DataPacket:
                 packet_type=packet_type,
                 class_id_present=(class_id is not None),
                 # indicators_26 is derived during packing for data packets based on trailer presence
+                indicators_25=bool(requiresVita49_2),
                 tsi=tsi,
                 tsf=tsf,
                 packet_count=int(packet_count),
@@ -74,6 +77,8 @@ class DataPacket:
         self.payload = payload
         self.trailer = trailer
         self.iq = iq
+        # Apply requiresVita49_2 to header flag directly
+        self.header.indicators_25 = bool(requiresVita49_2)
 
         # No indicators are exposed on the packet API; if needed, set on Header directly
         # Keep header.indicators_26 consistent with trailer presence for data packets

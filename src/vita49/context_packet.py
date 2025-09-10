@@ -48,6 +48,8 @@ class ContextPacket:
         cif0: CIF0Fields,
         cif_extra_masks: Optional[List[Tuple[int, int]]] = None,
         raw_cif_fields: Optional[List[int]] = None,
+        # If true, set header.indicators_25 (V49.2-only packet)
+        requiresVita49_2: bool = False,
     ) -> None:
         if header is None:
             if packet_type is None:
@@ -57,6 +59,7 @@ class ContextPacket:
                 class_id_present=(class_id is not None),
                 # Trailer bit has no meaning for context packets
                 indicators_26=False,
+                indicators_25=bool(requiresVita49_2),
                 tsi=tsi,
                 tsf=tsf,
                 packet_count=int(packet_count),
@@ -77,6 +80,8 @@ class ContextPacket:
             if raw_cif_fields is not None
             else None
         )
+        # Apply requiresVita49_2 to header flag directly
+        self.header.indicators_25 = bool(requiresVita49_2)
 
     # Convenience accessors expected by tests/users
     @property
