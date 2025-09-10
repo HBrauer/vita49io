@@ -1,7 +1,9 @@
 """I/O helpers for reading/writing VITA 49 containers.
 
-Placeholder package for future reader/writer utilities.
+Currently includes:
+- IQStreamWriter: build data/context packets for a configured IQ stream.
 """
 
-__all__: list[str] = []
+from .iq_writer import IQStreamWriter
 
+__all__ = ["IQStreamWriter"]

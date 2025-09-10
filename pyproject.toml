@@ -1,14 +1,14 @@
 [project]
-name = "vita49"
+name = "vita49io"
 version = "0.1.0"
 description = "VITA 49 (VRT) packet read/write utilities"
 readme = "README.md"
 requires-python = ">=3.8"
-authors = [{ name = "Your Name" }]
-license = { text = "Proprietary" }
+authors = [{ name = "H. Brauer" }]
+license = { text = "LICENSE" }
 classifiers = [
   "Programming Language :: Python :: 3",
-  "License :: Other/Proprietary License",
+  "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
 ]
 
