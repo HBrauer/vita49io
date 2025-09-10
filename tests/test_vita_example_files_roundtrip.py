@@ -71,7 +71,7 @@ class TestVitaExampleFilesRoundtrip(unittest.TestCase):
         files = [
             os.path.join(examples_dir, name)
             for name in os.listdir(examples_dir)
-            if os.path.isfile(os.path.join(examples_dir, name)) and name.endswith(".vita49")
+            if os.path.isfile(os.path.join(examples_dir, name)) and (name.endswith(".vita49")) or (name.endswith(".v49"))
         ]
 
         self.assertTrue(files, "No files found in vita_example_files")
