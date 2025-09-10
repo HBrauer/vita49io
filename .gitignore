@@ -3,3 +3,5 @@ __pycache__/
 doc/
 vita_example_files/
 tests/_artifacts/
+.vscode/
+.pytest_cache/

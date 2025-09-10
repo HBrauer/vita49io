@@ -4,7 +4,7 @@ Small Python Packet for reading and writing Vita 49 streams or files
 VITA 49 (VRT) Python Library
 ============================
 
-This package provides minimal read/write support for VITA 49.0 (VRT) packets:
+This package provides minimal read/write support for VITA 49.2 (VRT) packets:
 
 - Parse VRT headers, presence flags, stream ID, class ID, timestamps, payload, trailer
 - Serialize the same fields back to bytes
@@ -40,5 +40,5 @@ Notes
 - Packet size is computed automatically from present fields.
 - Class ID is represented as (oui, information_class, packet_class).
 - Trailer is parsed/serialized as a raw 32-bit word for now.
-- This library targets VITA 49.0 common header layout. Some advanced/optional fields may be added later.
+- This library targets VITA 49.2 common header layout. Some advanced/optional fields may be added later.
 
