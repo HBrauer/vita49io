@@ -50,6 +50,8 @@ class ContextPacket:
         raw_cif_fields: Optional[List[int]] = None,
         # If true, set header.indicators_25 (V49.2-only packet)
         requiresVita49_2: bool = False,
+        # If true, set header.indicators_24 (Timestamp Mode bit / TSM)
+        timestamp_mode: bool = False,
     ) -> None:
         if header is None:
             if packet_type is None:
@@ -58,6 +60,7 @@ class ContextPacket:
                 packet_type=packet_type,
                 class_id_present=(class_id is not None),
                 indicators_25=bool(requiresVita49_2),
+                indicators_24=bool(timestamp_mode),
                 tsi=tsi,
                 tsf=tsf,
                 packet_count=int(packet_count),
@@ -72,14 +75,11 @@ class ContextPacket:
             raise TypeError("cif0 is required for ContextPacket")
         self.cif0 = cif0
         self.cif_extra_masks = cif_extra_masks
-        # Store additional CIF words as 32-bit values if provided
-        self.raw_cif_fields = (
-            [int(w) & 0xFFFFFFFF for w in raw_cif_fields]
-            if raw_cif_fields is not None
-            else None
-        )
+        self.raw_cif_fields = raw_cif_fields 
         # Apply requiresVita49_2 to header flag directly
         self.header.indicators_25 = bool(requiresVita49_2)
+        # Apply Timestamp Mode (TSM) to header flag directly (indicator bit 24)
+        self.header.indicators_24 = bool(timestamp_mode)
 
     # Convenience accessors expected by tests/users
     @property
