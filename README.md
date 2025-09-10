@@ -64,8 +64,8 @@ ctx = ContextPacket(
     fractional_seconds=0,
     cif0=cif0,
 )
-ctx_bytes = ctx.pack()
-ctx_same = ContextPacket.parse(ctx_bytes)
+ctx_bytes = ctx.to_bytes()
+ctx_same = ContextPacket.from_bytes(ctx_bytes)
 ```
 
 Example: build a Data packet using raw payload bytes
@@ -88,7 +88,7 @@ pkt = DataPacket(
     fractional_seconds=0,
     payload=payload,  # raw payload goes here
 )
-raw = pkt.pack()
+raw = pkt.to_bytes()
 
 # If you know the payload format (e.g., from the last Context packet),
 # pass it to decode IQ back to a complex64 NumPy array.
@@ -107,7 +107,7 @@ pf = PayloadFormat(
     repeat_count=1,
     vector_size=0,
 )
-same = DataPacket.parse(raw, payload_format=pf)
+same = DataPacket.from_bytes(raw, payload_format=pf)
 iq = same.iq  # complex64 array of shape (2,)
 ```
 
@@ -140,12 +140,12 @@ with open(path, "rb") as f:
         rest = f.read((header.packet_size - 1) * 4)
         pkt_bytes = h + rest
         if header.packet_type is PacketType.CONTEXT_PACKET:
-            ctx = ContextPacket.parse(pkt_bytes)
+            ctx = ContextPacket.from_bytes(pkt_bytes)
             if ctx.cif0 and ctx.cif0.payload_format:
                 last_pf = ctx.cif0.payload_format
             handle(ctx)
         else:
-            data = DataPacket.parse(pkt_bytes, payload_format=last_pf)
+            data = DataPacket.from_bytes(pkt_bytes, payload_format=last_pf)
             # data.iq is a complex64 NumPy array when last_pf is compatible
             handle(data)
 ```
@@ -169,7 +169,7 @@ w = IQStreamWriter(
 
 # Context first
 ctx = w.build_context_packet()
-out = bytearray(ctx.pack())
+out = bytearray(ctx.to_bytes())
 
 # Emit IQ in blocks; accepts complex or shape (N,2)
 tone = 50_000.0

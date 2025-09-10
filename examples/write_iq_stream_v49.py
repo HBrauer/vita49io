@@ -37,7 +37,7 @@ def main(argv: list[str]) -> int:
 
     # Build a context packet first
     ctx = w.build_context_packet()
-    data = bytearray(ctx.pack())
+    data = bytearray(ctx.to_bytes())
 
     # Generate a test tone and emit in blocks
     tone_hz = 50_000.0

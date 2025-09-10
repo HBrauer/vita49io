@@ -30,7 +30,7 @@ class DataPacket:
     payload: bytes = b""
     trailer: Optional[int] = None
     # Optional decoded IQ samples (complex64) when a compatible PayloadFormat
-    # is provided to parse(). Not serialized unless pack() is called with a
+    # is provided to from_bytes(). Not serialized unless to_bytes() is called with a
     # compatible payload_format.
     iq: Optional["np.ndarray"] = None
 
@@ -58,7 +58,7 @@ class DataPacket:
         if header is None:
             if packet_type is None:
                 raise TypeError("Either header or packet_type must be provided")
-            # packet_size is computed during pack()
+            # packet_size is computed during to_bytes()
             header = Header(
                 packet_type=packet_type,
                 class_id_present=(class_id is not None),
@@ -141,7 +141,7 @@ class DataPacket:
             parts.append(f"iq_len={n}")
         return f"DataPacket({', '.join(parts)})"
 
-    def pack(self, payload_format: Optional[PayloadFormat] = None) -> bytes:
+    def to_bytes(self, payload_format: Optional[PayloadFormat] = None) -> bytes:
         if self.header.packet_type not in (
             PacketType.IF_DATA_WITHOUT_STREAM_ID,
             PacketType.IF_DATA_WITH_STREAM_ID,
@@ -191,7 +191,7 @@ class DataPacket:
         return _finalize_words_to_bytes(words)
 
     @staticmethod
-    def parse(data: bytes, payload_format: Optional[PayloadFormat] = None) -> "DataPacket":
+    def from_bytes(data: bytes, payload_format: Optional[PayloadFormat] = None) -> "DataPacket":
         if len(data) < 4 or len(data) % 4 != 0:
             raise ValueError("Invalid VRT packet length")
         words = [_unpack_u32_be(data[i : i + 4]) for i in range(0, len(data), 4)]
@@ -410,4 +410,3 @@ def _encode_iq_payload(iq: "np.ndarray", pf: PayloadFormat) -> bytes:
     # ipf == 32 here; pack lower di bits of 32-bit field
     fields32 = (uvals & ((1 << di) - 1)).astype(np.uint32)
     return fields32.astype(">u4").tobytes()
-

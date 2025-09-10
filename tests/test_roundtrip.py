@@ -15,8 +15,8 @@ class TestVRT(unittest.TestCase):
             payload=b"\xDE\xAD\xBE\xEF\x00\x11\x22\x33",
             packet_count=7,
         )
-        b = p.pack()
-        q = DataPacket.parse(b)
+        b = p.to_bytes()
+        q = DataPacket.from_bytes(b)
 
         self.assertEqual(q.packet_type, PacketType.IF_DATA_WITH_STREAM_ID)
         self.assertEqual(q.stream_id, 0x12345678)
@@ -40,8 +40,8 @@ class TestVRT(unittest.TestCase):
             cif0=CIF0Fields(),
             raw_cif_fields=[extra_word],
         )
-        b = p.pack()
-        q = ContextPacket.parse(b)
+        b = p.to_bytes()
+        q = ContextPacket.from_bytes(b)
         self.assertEqual(q.packet_type, PacketType.CONTEXT_PACKET)
         self.assertEqual(q.stream_id, 0x01020304)
         self.assertEqual(q.class_id, (0x00AABB, 0x1122, 0x3344))
@@ -94,8 +94,8 @@ class TestVRT(unittest.TestCase):
                         trailer=0xFEEDC0DE,
                         packet_count=9,
                     )
-                    b = p.pack()
-                    q = DataPacket.parse(b)
+                    b = p.to_bytes()
+                    q = DataPacket.from_bytes(b)
 
                     self.assertEqual(q.packet_type, pt)
                     self.assertEqual(q.stream_id, stream_id)
@@ -168,8 +168,8 @@ class TestVRT(unittest.TestCase):
                 iq=base_iq,
                 packet_count=3,
             )
-            b = p.pack(payload_format=pf)
-            q = DataPacket.parse(b, payload_format=pf)
+            b = p.to_bytes(payload_format=pf)
+            q = DataPacket.from_bytes(b, payload_format=pf)
 
             self.assertEqual(q.packet_type, PacketType.IF_DATA_WITH_STREAM_ID)
             self.assertEqual(q.stream_id, 0x22223333)

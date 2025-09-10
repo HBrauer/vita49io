@@ -43,7 +43,7 @@ def _iter_packets(path: str):
             packet_bytes = w0_bytes + rest
 
             if header.packet_type == PacketType.CONTEXT_PACKET:
-                pkt = ContextPacket.parse(packet_bytes)
+                pkt = ContextPacket.from_bytes(packet_bytes)
                 yield pkt
             elif header.packet_type in (
                 PacketType.IF_DATA_WITHOUT_STREAM_ID,
@@ -51,7 +51,7 @@ def _iter_packets(path: str):
                 PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
                 PacketType.EXTENSION_DATA_WITH_STREAM_ID,
             ):
-                yield DataPacket.parse(packet_bytes)
+                yield DataPacket.from_bytes(packet_bytes)
             else:
                 raise ValueError(
                     f"Unsupported packet type at index {index}: {header.packet_type}"
@@ -85,7 +85,7 @@ class TestVitaExampleFilesRoundtrip(unittest.TestCase):
                 # Repack all packets into memory buffer
                 out = io.BytesIO()
                 for pkt in _iter_packets(path):
-                    out.write(pkt.pack())
+                    out.write(pkt.to_bytes())
                 repacked = out.getvalue()
 
                 # Also write to a temp file to satisfy the requirement

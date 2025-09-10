@@ -18,7 +18,7 @@ def read_packets_with_iq(path: str):
     """Iterate packets and yield (iq, sample_rate_hz) for each DataPacket.
 
     Keeps track of the last CIF0 payload format, which enables IQ decoding
-    in DataPacket.parse(). Also extracts sample_rate_hz from CIF0 when present.
+    in DataPacket.from_bytes(). Also extracts sample_rate_hz from CIF0 when present.
     """
     from vita49io.protocol.core import Header
     from vita49io.protocol.enums import PacketType
@@ -55,7 +55,7 @@ def read_packets_with_iq(path: str):
             packet_bytes = w0_bytes + rest
 
             if header.packet_type == PacketType.CONTEXT_PACKET:
-                pkt = ContextPacket.parse(packet_bytes)
+                pkt = ContextPacket.from_bytes(packet_bytes)
                 if pkt.cif0 is not None:
                     if pkt.cif0.payload_format is not None:
                         last_payload_format = pkt.cif0.payload_format
@@ -67,7 +67,7 @@ def read_packets_with_iq(path: str):
                 PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
                 PacketType.EXTENSION_DATA_WITH_STREAM_ID,
             ):
-                pkt = DataPacket.parse(packet_bytes, payload_format=last_payload_format)
+                pkt = DataPacket.from_bytes(packet_bytes, payload_format=last_payload_format)
                 if getattr(pkt, "iq", None) is not None:
                     yield pkt.iq, last_sample_rate_hz
             else:

@@ -28,8 +28,8 @@ class TestCIF0(unittest.TestCase):
             packet_count=1,
         )
 
-        b = p.pack()
-        q = ContextPacket.parse(b)
+        b = p.to_bytes()
+        q = ContextPacket.from_bytes(b)
 
         # Validate parsed CIF0 fields directly
         self.assertIsNotNone(q.cif0)

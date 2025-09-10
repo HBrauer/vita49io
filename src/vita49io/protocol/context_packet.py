@@ -128,7 +128,7 @@ class ContextPacket:
             parts.append("indicators_24=True")
         return f"ContextPacket({', '.join(parts)})"
 
-    def pack(self) -> bytes:
+    def to_bytes(self) -> bytes:
         if self.header.packet_type is not PacketType.CONTEXT_PACKET:
             raise ValueError("ContextPacket must have CONTEXT_PACKET packet_type")
         if self.stream_id is None:
@@ -161,7 +161,7 @@ class ContextPacket:
         return _finalize_words_to_bytes(words)
 
     @staticmethod
-    def parse(data: bytes) -> "ContextPacket":
+    def from_bytes(data: bytes) -> "ContextPacket":
         if len(data) < 4 or len(data) % 4 != 0:
             raise ValueError("Invalid VRT packet length")
         words = [_unpack_u32_be(data[i : i + 4]) for i in range(0, len(data), 4)]
@@ -207,4 +207,3 @@ class ContextPacket:
         )
 
 __all__ = ["ContextPacket"]
-

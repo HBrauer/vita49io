@@ -57,7 +57,7 @@ def read_all_packets(path: str):
             packet_bytes = w0_bytes + rest
 
             if header.packet_type == PacketType.CONTEXT_PACKET:
-                pkt = ContextPacket.parse(packet_bytes)
+                pkt = ContextPacket.from_bytes(packet_bytes)
                 # If ContextPacket already parsed CIF0, reuse it to update
                 # the last known payload format for subsequent data packets.
                 if pkt.cif0 is not None and pkt.cif0.payload_format is not None:
@@ -69,7 +69,7 @@ def read_all_packets(path: str):
                 PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
                 PacketType.EXTENSION_DATA_WITH_STREAM_ID,
             ):
-                pkt = DataPacket.parse(packet_bytes, payload_format=last_payload_format)
+                pkt = DataPacket.from_bytes(packet_bytes, payload_format=last_payload_format)
                 yield pkt
             else:
                 raise ValueError(f"Unsupported packet type at index {index}: {header.packet_type}")

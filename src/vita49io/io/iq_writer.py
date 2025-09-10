@@ -145,7 +145,7 @@ class IQStreamWriter:
 
         The returned packet includes stream ID, class ID (if provided),
         timestamps per configured TSI/TSF, and IQ samples attached in the
-        `iq` field. Serialize via packet.pack(payload_format=self.payload_format).
+        `iq` field. Serialize via packet.to_bytes(payload_format=self.payload_format).
         """
         # Determine number of IQ samples
         arr = np.asarray(iq)
@@ -188,7 +188,7 @@ class IQStreamWriter:
     def build_data_packet_bytes(self, iq: "np.ndarray") -> bytes:
         """Build and serialize a data packet for the provided IQ block."""
         pkt = self.build_data_packet(iq)
-        return pkt.pack(payload_format=self.payload_format)
+        return pkt.to_bytes(payload_format=self.payload_format)
 
     def build_context_packet(self) -> ContextPacket:
         """Create a ContextPacket reflecting current configuration and time.
