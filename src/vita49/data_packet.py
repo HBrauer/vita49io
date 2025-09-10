@@ -174,13 +174,15 @@ class DataPacket:
             raise ValueError("Packet type forbids a Stream ID, but one was provided")
 
         # Build common prefix using _Common helper
+        # Ensure header.indicators_26 matches trailer presence for data packets
+        self.header.indicators_26 = self.trailer is not None
+
         common = _Common(
             header=self.header,
             stream_id=self.stream_id,
             class_id=self.class_id,
             integer_seconds=self.integer_seconds,
             fractional_seconds=self.fractional_seconds,
-            trailer=self.trailer,
         )
         words: List[int] = _pack_common_prefix(common)
 
@@ -211,8 +213,14 @@ class DataPacket:
             PacketType.EXTENSION_DATA_WITH_STREAM_ID,
         ):
             raise ValueError("Not a Data packet type")
+        # Determine trailer presence from header.indicators_26
+        trailer: Optional[int] = None
+        if header.indicators_26:
+            if end_idx <= idx:
+                raise ValueError("Truncated packet: trailer indicated but no words present")
+            trailer = words[-1]
+            end_idx = len(words) - 1
         payload = _payload_words_to_bytes(words[idx:end_idx])
-        trailer = common.trailer
 
         iq = None
         if payload_format is not None:

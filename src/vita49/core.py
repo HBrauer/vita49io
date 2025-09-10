@@ -138,7 +138,6 @@ class _Common:
     class_id: Optional[ClassID]
     integer_seconds: Optional[int]
     fractional_seconds: Optional[int]
-    trailer: Optional[int]
 
 
 def _pack_common_prefix(c: _Common) -> List[int]:
@@ -147,18 +146,7 @@ def _pack_common_prefix(c: _Common) -> List[int]:
     hdr = Header(
         packet_type=c.header.packet_type,
         class_id_present=c.class_id is not None,
-        # indicators_26 is only defined for data packets; ignore for context packets.
-        indicators_26=(
-            c.trailer is not None
-            and c.header.packet_type
-            in (
-                PacketType.IF_DATA_WITHOUT_STREAM_ID,
-                PacketType.IF_DATA_WITH_STREAM_ID,
-                PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
-                PacketType.EXTENSION_DATA_WITH_STREAM_ID,
-            )
-        ),
-        # Preserve indicator bits 25 and 24 from the input header
+        indicators_26=c.header.indicators_25,
         indicators_25=c.header.indicators_25,
         indicators_24=c.header.indicators_24,
         tsi=c.header.tsi,
@@ -213,7 +201,6 @@ def _parse_common_from_words(words: List[int]) -> tuple[_Common, int, int]:
     hdr = Header.parse(words[0])
     pkt_type = hdr.packet_type
     c_present = hdr.class_id_present
-    t_present = hdr.indicators_26
     tsi = hdr.tsi
     tsf = hdr.tsf
     pkt_size_words = hdr.packet_size
@@ -263,11 +250,7 @@ def _parse_common_from_words(words: List[int]) -> tuple[_Common, int, int]:
         fractional_seconds = ((msw & 0xFFFFFFFF) << 32) | (lsw & 0xFFFFFFFF)
         idx += 2
 
-    trailer: Optional[int] = None
     end_idx = len(words)
-    if t_present:
-        trailer = words[-1]
-        end_idx -= 1
 
     common = _Common(
         header=hdr,
@@ -275,7 +258,6 @@ def _parse_common_from_words(words: List[int]) -> tuple[_Common, int, int]:
         class_id=class_id,
         integer_seconds=integer_seconds,
         fractional_seconds=fractional_seconds,
-        trailer=trailer,
     )
     return common, idx, end_idx
 

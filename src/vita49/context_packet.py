@@ -141,7 +141,6 @@ class ContextPacket:
             class_id=self.class_id,
             integer_seconds=self.integer_seconds,
             fractional_seconds=self.fractional_seconds,
-            trailer=None,
         )
         words = _pack_common_prefix(common)
 
