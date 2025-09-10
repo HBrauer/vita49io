@@ -62,7 +62,7 @@ class DataPacket:
             header = Header(
                 packet_type=packet_type,
                 class_id_present=(class_id is not None),
-                # indicators_26 is derived during packing for data packets based on trailer presence
+                indicators_26=(trailer is not None),  
                 indicators_25=bool(requiresVita49_2),
                 tsi=tsi,
                 tsf=tsf,
@@ -77,18 +77,6 @@ class DataPacket:
         self.payload = payload
         self.trailer = trailer
         self.iq = iq
-        # Apply requiresVita49_2 to header flag directly
-        self.header.indicators_25 = bool(requiresVita49_2)
-
-        # No indicators are exposed on the packet API; if needed, set on Header directly
-        # Keep header.indicators_26 consistent with trailer presence for data packets
-        if self.header.packet_type in (
-            PacketType.IF_DATA_WITHOUT_STREAM_ID,
-            PacketType.IF_DATA_WITH_STREAM_ID,
-            PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
-            PacketType.EXTENSION_DATA_WITH_STREAM_ID,
-        ):
-            self.header.indicators_26 = self.trailer is not None
 
     # Thin convenience accessors expected by tests/users
     @property
@@ -135,10 +123,8 @@ class DataPacket:
             parts.append(f"trailer={_hex32(self.trailer)}")
         # Show packet count always for debugging sequences
         parts.append(f"packet_count={self.header.packet_count}")
-        # Indicator bits (for debugging)
-        if self.header.indicators_25:
-            parts.append("indicators_25=True")
-        if self.header.indicators_24:
+        parts.append(f"requiresVita49_2={self.header.indicators_25}")
+        if self.header.indicators_24: # Indicator bits (for debugging)
             parts.append("indicators_24=True")
         # If IQ present, summarize size without importing numpy
         if self.iq is not None:
@@ -177,10 +163,10 @@ class DataPacket:
             PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
         ) and self.stream_id is not None:
             raise ValueError("Packet type forbids a Stream ID, but one was provided")
-
-        # Build common prefix using _Common helper
-        # Ensure header.indicators_26 matches trailer presence for data packets
-        self.header.indicators_26 = self.trailer is not None
+        if self.header.class_id_present and self.class_id is None:
+            raise ValueError("Packet type requires a Class ID, but none provided")
+        if self.header.indicators_26 and self.trailer is None:
+            raise ValueError("Packet type requires a trailer, but none provided")
 
         common = _Common(
             header=self.header,
