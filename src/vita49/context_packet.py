@@ -76,10 +76,7 @@ class ContextPacket:
         self.cif0 = cif0
         self.cif_extra_masks = cif_extra_masks
         self.raw_cif_fields = raw_cif_fields 
-        # Apply requiresVita49_2 to header flag directly
-        self.header.indicators_25 = bool(requiresVita49_2)
-        # Apply Timestamp Mode (TSM) to header flag directly (indicator bit 24)
-        self.header.indicators_24 = bool(timestamp_mode)
+
 
     # Convenience accessors expected by tests/users
     @property
