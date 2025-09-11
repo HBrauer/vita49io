@@ -1,5 +1,4 @@
-# vita49io
-Small Python Packet for reading and writing Vita 49 streams or files
+This project is not affiliated with or endorsed by the VITA Standards Organization.
 
 VITA 49 (VRT) Python Library
 ============================
