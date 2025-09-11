@@ -305,7 +305,7 @@ class CIF0Fields:
 
         idx = 0
 
-        def need(n: int):
+        def need(n: int) -> None:
             nonlocal idx
             if idx + n > len(field_words):
                 raise ValueError("Truncated CIF0 payload")
@@ -400,6 +400,7 @@ class CIF0Fields:
             idx += 2
         return f, idx
 
+    @staticmethod
     def parse(payload: bytes) -> Tuple["CIF0Fields", int]:
         """Parse CIF0 payload. Returns (cif0, bytes_consumed).
 
@@ -421,4 +422,3 @@ __all__ = [
     "SampleType",
     "DataItemFormat",
 ]
-

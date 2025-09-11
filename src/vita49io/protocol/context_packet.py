@@ -21,12 +21,12 @@ from .vrt_types import ClassID
 @dataclass(init=False)
 class ContextPacket:
     header: Header
+    # Required structured CIF0 describing context information. Set in __init__.
+    cif0: Optional[CIF0Fields] = None
     stream_id: Optional[int] = None
     class_id: Optional[ClassID] = None
     integer_seconds: Optional[int] = None
     fractional_seconds: Optional[int] = None
-    # Required structured CIF0 describing context information.
-    cif0: CIF0Fields
     # Optional list of additional CIF masks found after CIF0 mask.
     # Each entry is (cif_index, mask) for CIF1..CIF6 when present.
     cif_extra_masks: Optional[List[Tuple[int, int]]] = None
@@ -145,8 +145,10 @@ class ContextPacket:
         words = _pack_common_prefix(common)
 
         # Build payload words: combined CIF0 mask, extra masks, CIF0 fields, then raw CIF fields
-        
-        cif0_words: List[int] = _payload_bytes_to_words(self.cif0.pack())
+        if self.cif0 is None:
+            raise TypeError("cif0 is required for ContextPacket")
+        cif0 = self.cif0
+        cif0_words: List[int] = _payload_bytes_to_words(cif0.pack())
         cif0_mask = cif0_words[0] & 0xFFFFFFFF
         if self.cif_extra_masks:
             for i, _m in self.cif_extra_masks:

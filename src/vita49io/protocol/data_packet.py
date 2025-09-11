@@ -128,14 +128,14 @@ class DataPacket:
             parts.append("indicators_24=True")
         # If IQ present, summarize size without importing numpy
         if self.iq is not None:
-            n = None
+            n = 0
             try:
-                n = int(getattr(self.iq, "size", None))
+                n = int(getattr(self.iq, "size", 0))
             except Exception:
                 pass
-            if n is None:
+            if n == 0:
                 try:
-                    n = len(self.iq)  # type: ignore[arg-type]
+                    n = len(self.iq)
                 except Exception:
                     n = 0
             parts.append(f"iq_len={n}")
@@ -279,40 +279,40 @@ def _validate_supported(pf: PayloadFormat) -> Tuple[int, int, DataItemFormat]:
     return ipf, di, fmt
 
 
-def _decode_iq_payload(payload: bytes, pf: PayloadFormat):
+def _decode_iq_payload(payload: bytes, pf: PayloadFormat) -> "np.ndarray":
 
     ipf, di, fmt = _validate_supported(pf)
 
     # Fast paths for common full-width cases
     if ipf == 32 and di == 32:
         if fmt == DataItemFormat.IEEE754_SINGLE:
-            floats = np.frombuffer(payload, dtype=">f4")  # type: ignore[arg-type]
+            floats = np.frombuffer(payload, dtype=">f4")
             if floats.size % 2 != 0:
                 raise ValueError("Payload does not contain an even number of components for I/Q")
             iq = floats.reshape(-1, 2).astype(np.float32)
             return (iq[:, 0] + 1j * iq[:, 1]).astype(np.complex64)
         if fmt == DataItemFormat.SIGNED_FIXED_POINT:
-            s32 = np.frombuffer(payload, dtype=">i4")  # type: ignore[arg-type]
+            s32 = np.frombuffer(payload, dtype=">i4")
             # Use float64 for arithmetic, then cast to float32 to avoid precision loss
             vals = (s32.astype(np.float64) / float(1 << 31)).astype(np.float32)
         else:  # UNSIGNED_FIXED_POINT
-            u32 = np.frombuffer(payload, dtype=">u4")  # type: ignore[arg-type]
+            u32 = np.frombuffer(payload, dtype=">u4")
             # Use float64 for arithmetic, then cast to float32 to avoid precision loss
             vals = (u32.astype(np.float64) / float(1 << 32)).astype(np.float32)
     elif ipf == 16 and di == 16:
         if fmt == DataItemFormat.SIGNED_FIXED_POINT:
-            s16 = np.frombuffer(payload, dtype=">i2")  # type: ignore[arg-type]
+            s16 = np.frombuffer(payload, dtype=">i2")
             vals = (s16.astype(np.float32) / float(1 << 15)).astype(np.float32)
         else:  # UNSIGNED_FIXED_POINT
-            u16 = np.frombuffer(payload, dtype=">u2")  # type: ignore[arg-type]
+            u16 = np.frombuffer(payload, dtype=">u2")
             vals = (u16.astype(np.float32) / float(1 << 16)).astype(np.float32)
     else:
         # Generic paths: extract fields as big-endian and unpack lower di bits
         if ipf == 16:
-            fields = np.frombuffer(payload, dtype=">u2")  # type: ignore[arg-type]
+            fields = np.frombuffer(payload, dtype=">u2")
             uvals = fields.astype(np.uint32)
         else:  # ipf == 32
-            fields32 = np.frombuffer(payload, dtype=">u4")  # type: ignore[arg-type]
+            fields32 = np.frombuffer(payload, dtype=">u4")
             uvals = fields32
 
         if di < 32:
