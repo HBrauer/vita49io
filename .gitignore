@@ -5,3 +5,5 @@ vita_example_files/
 tests/_artifacts/
 .vscode/
 .pytest_cache/
+src/vita49io.egg-info/
+dist/
