@@ -249,7 +249,7 @@ def _validate_supported(pf: PayloadFormat) -> Tuple[int, int, DataItemFormat]:
         raise ValueError("Unsupported data item fraction size: must be 0")
     if pf.vector_size != 0:
         raise ValueError("Unsupported vector size: only vector size 0 is supported")
-    if pf.repeat_count != 1:
+    if pf.repeat_count > 1:
         raise ValueError(f"Unsupported repeat count of {pf.repeat_count}, only 1 is supported")
 
     try:
