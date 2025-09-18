@@ -1,17 +1,5 @@
 """Provide helpers for constructing and parsing VITA 49 context packets.
 
-Args:
-    None.
-
-Returns:
-    None.
-
-Raises:
-    None.
-
-Side Effects:
-    None.
-
 Examples:
     >>> from vita49io.protocol.context_packet import ContextPacket
     >>> from vita49io.protocol.cif0 import CIF0Fields
@@ -52,15 +40,6 @@ class ContextPacket:
         fractional_seconds (Optional[int]): Fractional seconds timestamp component when TSF is set.
         cif_extra_masks (Optional[List[Tuple[int, int]]]): Additional CIF mask words beyond CIF0.
         raw_cif_fields (Optional[List[int]]): Raw CIF field words not decoded into structures.
-
-    Returns:
-        None.
-
-    Raises:
-        None.
-
-    Side Effects:
-        None.
 
     Examples:
         >>> from vita49io.protocol.context_packet import ContextPacket
@@ -132,17 +111,8 @@ class ContextPacket:
     def packet_type(self) -> PacketType:
         """Return the packet type reported by the context packet header.
 
-        Args:
-            None.
-
         Returns:
             PacketType: The header packet type enumeration.
-
-        Raises:
-            None.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.context_packet import ContextPacket
@@ -157,17 +127,8 @@ class ContextPacket:
     def tsi(self) -> TSI:
         """Return the Timestamp Integer (TSI) selection stored in the header.
 
-        Args:
-            None.
-
         Returns:
             TSI: The integer timestamp mode determining the presence of integer seconds.
-
-        Raises:
-            None.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.context_packet import ContextPacket
@@ -182,17 +143,8 @@ class ContextPacket:
     def tsf(self) -> TSF:
         """Return the Timestamp Fractional (TSF) selection stored in the header.
 
-        Args:
-            None.
-
         Returns:
             TSF: The fractional timestamp mode controlling fractional second interpretation.
-
-        Raises:
-            None.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.context_packet import ContextPacket
@@ -207,17 +159,8 @@ class ContextPacket:
     def packet_count(self) -> int:
         """Return the rolling packet count from the context packet header.
 
-        Args:
-            None.
-
         Returns:
             int: The 4-bit packet count sequence number.
-
-        Raises:
-            None.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.context_packet import ContextPacket
@@ -231,17 +174,8 @@ class ContextPacket:
     def __repr__(self) -> str:  # pragma: no cover - human-facing formatting
         """Generate a detailed string for debugging context packets.
 
-        Args:
-            None.
-
         Returns:
             str: A formatted string enumerating key header and CIF details.
-
-        Raises:
-            None.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.context_packet import ContextPacket
@@ -285,17 +219,11 @@ class ContextPacket:
     def to_bytes(self) -> bytes:
         """Serialize the context packet into bytes.
 
-        Args:
-            None.
-
         Returns:
             bytes: The serialized packet including header and CIF fields.
 
         Raises:
             ValueError: If required fields such as packet type or Stream ID are inconsistent.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.context_packet import ContextPacket
@@ -350,9 +278,6 @@ class ContextPacket:
 
         Raises:
             ValueError: If the bytes do not contain a valid context packet structure.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.context_packet import ContextPacket

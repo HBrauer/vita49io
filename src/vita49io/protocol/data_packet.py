@@ -1,17 +1,5 @@
 """Implement VITA 49 data packet helpers for encoding and decoding IQ payloads.
 
-Args:
-    None.
-
-Returns:
-    None.
-
-Raises:
-    None.
-
-Side Effects:
-    None.
-
 Examples:
     >>> from vita49io.protocol.data_packet import DataPacket
     >>> from vita49io.protocol.enums import PacketType
@@ -54,15 +42,6 @@ class DataPacket:
         payload (bytes): Raw payload buffer containing opaque data words.
         trailer (Optional[int]): Optional 32-bit trailer word when indicator bit 26 is set.
         iq (Optional[np.ndarray]): Decoded IQ samples when constructed from structured data.
-
-    Returns:
-        None.
-
-    Raises:
-        None.
-
-    Side Effects:
-        None.
 
     Examples:
         >>> from vita49io.protocol.data_packet import DataPacket
@@ -131,17 +110,8 @@ class DataPacket:
     def packet_type(self) -> PacketType:
         """Return the packet type reported by the packet header.
 
-        Args:
-            None.
-
         Returns:
             PacketType: The enumerated packet type associated with the packet.
-
-        Raises:
-            None.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.data_packet import DataPacket
@@ -155,17 +125,8 @@ class DataPacket:
     def tsi(self) -> TSI:
         """Return the Timestamp Integer (TSI) mode encoded in the header.
 
-        Args:
-            None.
-
         Returns:
             TSI: The enumerated integer timestamp mode.
-
-        Raises:
-            None.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.data_packet import DataPacket
@@ -179,17 +140,8 @@ class DataPacket:
     def tsf(self) -> TSF:
         """Return the Timestamp Fractional (TSF) mode encoded in the header.
 
-        Args:
-            None.
-
         Returns:
             TSF: The enumerated fractional timestamp selection.
-
-        Raises:
-            None.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.data_packet import DataPacket
@@ -203,17 +155,8 @@ class DataPacket:
     def packet_count(self) -> int:
         """Return the rolling packet count encoded in the header.
 
-        Args:
-            None.
-
         Returns:
             int: The lower 4-bit packet count value extracted from the header.
-
-        Raises:
-            None.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.data_packet import DataPacket
@@ -226,17 +169,8 @@ class DataPacket:
     def __repr__(self) -> str:  # pragma: no cover - human-facing formatting
         """Return a comprehensive string summary of the packet.
 
-        Args:
-            None.
-
         Returns:
             str: Human-readable fields for debugging sequences and payloads.
-
-        Raises:
-            None.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.data_packet import DataPacket
@@ -299,9 +233,6 @@ class DataPacket:
 
         Raises:
             ValueError: If the packet type is not one of the supported data packet variants or required fields are missing.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.data_packet import DataPacket
@@ -371,9 +302,6 @@ class DataPacket:
 
         Raises:
             ValueError: If the bytes are not a valid VITA 49 data packet or required fields are missing.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.data_packet import DataPacket

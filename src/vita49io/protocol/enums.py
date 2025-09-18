@@ -1,17 +1,5 @@
 """Define enumerations for common VITA 49 header fields.
 
-Args:
-    None.
-
-Returns:
-    None.
-
-Raises:
-    None.
-
-Side Effects:
-    None.
-
 Examples:
     >>> from vita49io.protocol.enums import PacketType
     >>> PacketType.CONTEXT_PACKET.value
@@ -25,18 +13,6 @@ from enum import IntEnum
 
 class PacketType(IntEnum):
     """Enumerate the VITA 49 packet type identifiers.
-
-    Args:
-        None.
-
-    Returns:
-        None.
-
-    Raises:
-        None.
-
-    Side Effects:
-        None.
 
     Examples:
         >>> from vita49io.protocol.enums import PacketType
@@ -55,18 +31,6 @@ class PacketType(IntEnum):
 class TSI(IntEnum):
     """Enumerate Timestamp Integer (TSI) selection modes for VITA 49 packets.
 
-    Args:
-        None.
-
-    Returns:
-        None.
-
-    Raises:
-        None.
-
-    Side Effects:
-        None.
-
     Examples:
         >>> from vita49io.protocol.enums import TSI
         >>> TSI.UTC.name
@@ -81,18 +45,6 @@ class TSI(IntEnum):
 
 class TSF(IntEnum):
     """Enumerate Timestamp Fractional (TSF) selection modes for VITA 49 packets.
-
-    Args:
-        None.
-
-    Returns:
-        None.
-
-    Raises:
-        None.
-
-    Side Effects:
-        None.
 
     Examples:
         >>> from vita49io.protocol.enums import TSF

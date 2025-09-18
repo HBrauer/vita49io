@@ -183,9 +183,6 @@ class PayloadFormat:
         Raises:
             ValueError: If the data item format code is unsupported.
 
-        Side Effects:
-            None.
-
         Examples:
             >>> from vita49io.protocol.cif0 import PayloadFormat
             >>> PayloadFormat.parse(0x00000000, 0x00010001).vector_size
@@ -230,17 +227,8 @@ class PayloadFormat:
     def pack_words(self) -> Tuple[int, int]:
         """Encode the payload format back into two 32-bit words.
 
-        Args:
-            None.
-
         Returns:
             Tuple[int, int]: Pair of words corresponding to the CIF0 payload format fields.
-
-        Raises:
-            None.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
@@ -354,15 +342,6 @@ class CIF0Fields:
         payload_format (Optional[PayloadFormat]): Parsed payload format helper.
         raw_low_bits (int): Unparsed lower mask bits reserved for future use.
 
-    Returns:
-        None.
-
-    Raises:
-        None.
-
-    Side Effects:
-        None.
-
     Examples:
         >>> from vita49io.protocol.cif0 import CIF0Fields
         >>> CIF0Fields().sample_rate_hz is None
@@ -447,17 +426,8 @@ class CIF0Fields:
     def pack(self) -> bytes:
         """Serialize the CIF0 fields into bytes beginning with the mask word.
 
-        Args:
-            None.
-
         Returns:
             bytes: Serialized CIF0 payload including mask and encoded fields.
-
-        Raises:
-            None.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.cif0 import CIF0Fields
@@ -533,9 +503,6 @@ class CIF0Fields:
 
         Raises:
             ValueError: If the mask requires more field words than provided.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.cif0 import CIF0Fields

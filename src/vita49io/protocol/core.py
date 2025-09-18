@@ -1,17 +1,5 @@
 """Implement low-level helpers for VITA 49 header and payload encoding.
 
-Args:
-    None.
-
-Returns:
-    None.
-
-Raises:
-    None.
-
-Side Effects:
-    None.
-
 Examples:
     >>> from vita49io.protocol.core import Header
     >>> from vita49io.protocol.enums import PacketType, TSI, TSF
@@ -80,15 +68,6 @@ class Header:
         packet_count (int): Rolling 4-bit sequence counter.
         packet_size (int): Packet size in 32-bit words including the header.
 
-    Returns:
-        None.
-
-    Raises:
-        None.
-
-    Side Effects:
-        None.
-
     Examples:
         >>> from vita49io.protocol.core import Header
         >>> from vita49io.protocol.enums import PacketType
@@ -109,17 +88,11 @@ class Header:
     def pack(self) -> int:
         """Serialize the header fields into a 32-bit word.
 
-        Args:
-            None.
-
         Returns:
             int: The packed 32-bit header word encoded in big-endian bit order.
 
         Raises:
             ValueError: If `packet_count` is outside 0..15 or `packet_size` outside 0..65535.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.core import Header
@@ -152,17 +125,8 @@ class Header:
     def __repr__(self) -> str:  # pragma: no cover - human-facing formatting
         """Return a debug-friendly string representation of the header.
 
-        Args:
-            None.
-
         Returns:
             str: A descriptive string detailing header fields.
-
-        Raises:
-            None.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.core import Header
@@ -199,9 +163,6 @@ class Header:
 
         Raises:
             ValueError: If the header bits map to an unknown PacketType, TSI, or TSF value.
-
-        Side Effects:
-            None.
 
         Examples:
             >>> from vita49io.protocol.core import Header

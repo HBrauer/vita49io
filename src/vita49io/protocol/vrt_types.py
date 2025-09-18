@@ -1,17 +1,5 @@
 """Provide shared type aliases for VITA 49 identifiers.
 
-Args:
-    None.
-
-Returns:
-    None.
-
-Raises:
-    None.
-
-Side Effects:
-    None.
-
 Examples:
     >>> from vita49io.protocol.vrt_types import ClassID
     >>> ClassID.__args__

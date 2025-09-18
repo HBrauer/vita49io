@@ -1,17 +1,5 @@
 """Expose protocol primitives for constructing and parsing VITA 49 packets.
 
-Args:
-    None.
-
-Returns:
-    None.
-
-Raises:
-    None.
-
-Side Effects:
-    Imports commonly used protocol classes on subpackage import.
-
 Examples:
     >>> from vita49io.protocol import DataPacket
     >>> isinstance(DataPacket, type)
