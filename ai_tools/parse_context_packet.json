@@ -1,0 +1,17 @@
+{
+  "name": "parse_context_packet",
+  "description": "Parse a VITA 49 context packet from bytes using vita49io.protocol.context_packet.ContextPacket.from_bytes.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "data": {
+        "type": "string",
+        "description": "Packet bytes encoded as a hexadecimal string."
+      }
+    },
+    "required": [
+      "data"
+    ],
+    "additionalProperties": false
+  }
+}

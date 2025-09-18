@@ -1,0 +1,17 @@
+{
+  "name": "parse_header_word",
+  "description": "Decode a VITA 49 header word via vita49io.protocol.core.Header.parse.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "header_word": {
+        "type": "integer",
+        "description": "Unsigned 32-bit integer representing the VITA 49 header."
+      }
+    },
+    "required": [
+      "header_word"
+    ],
+    "additionalProperties": false
+  }
+}

@@ -1,3 +1,24 @@
+"""Implement VITA 49 data packet helpers for encoding and decoding IQ payloads.
+
+Args:
+    None.
+
+Returns:
+    None.
+
+Raises:
+    None.
+
+Side Effects:
+    None.
+
+Examples:
+    >>> from vita49io.protocol.data_packet import DataPacket
+    >>> from vita49io.protocol.enums import PacketType
+    >>> DataPacket(packet_type=PacketType.IF_DATA_WITH_STREAM_ID, stream_id=1).payload
+    b''
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -22,6 +43,33 @@ from .cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
 
 @dataclass(init=False)
 class DataPacket:
+    """Represent a VITA 49 data packet with optional IQ payload helpers.
+
+    Args:
+        header (Header): Pre-built header to attach to the packet.
+        stream_id (Optional[int]): Stream identifier value if the packet type carries one.
+        class_id (Optional[ClassID]): VITA 49 class identifier tuple when present.
+        integer_seconds (Optional[int]): Integer seconds component for timestamped packets.
+        fractional_seconds (Optional[int]): Fractional seconds component for timestamped packets.
+        payload (bytes): Raw payload buffer containing opaque data words.
+        trailer (Optional[int]): Optional 32-bit trailer word when indicator bit 26 is set.
+        iq (Optional[np.ndarray]): Decoded IQ samples when constructed from structured data.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+
+    Side Effects:
+        None.
+
+    Examples:
+        >>> from vita49io.protocol.data_packet import DataPacket
+        >>> from vita49io.protocol.enums import PacketType
+        >>> DataPacket(packet_type=PacketType.IF_DATA_WITH_STREAM_ID, stream_id=1).stream_id
+        1
+    """
     header: Header
     stream_id: Optional[int] = None
     class_id: Optional[ClassID] = None
@@ -81,21 +129,120 @@ class DataPacket:
     # Thin convenience accessors expected by tests/users
     @property
     def packet_type(self) -> PacketType:
+        """Return the packet type reported by the packet header.
+
+        Args:
+            None.
+
+        Returns:
+            PacketType: The enumerated packet type associated with the packet.
+
+        Raises:
+            None.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.data_packet import DataPacket
+            >>> from vita49io.protocol.enums import PacketType
+            >>> DataPacket(packet_type=PacketType.IF_DATA_WITH_STREAM_ID, stream_id=1).packet_type
+            <PacketType.IF_DATA_WITH_STREAM_ID: 1>
+        """
         return self.header.packet_type
 
     @property
     def tsi(self) -> TSI:
+        """Return the Timestamp Integer (TSI) mode encoded in the header.
+
+        Args:
+            None.
+
+        Returns:
+            TSI: The enumerated integer timestamp mode.
+
+        Raises:
+            None.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.data_packet import DataPacket
+            >>> from vita49io.protocol.enums import PacketType, TSI
+            >>> DataPacket(packet_type=PacketType.IF_DATA_WITH_STREAM_ID, stream_id=1, tsi=TSI.UTC).tsi
+            <TSI.UTC: 1>
+        """
         return self.header.tsi
 
     @property
     def tsf(self) -> TSF:
+        """Return the Timestamp Fractional (TSF) mode encoded in the header.
+
+        Args:
+            None.
+
+        Returns:
+            TSF: The enumerated fractional timestamp selection.
+
+        Raises:
+            None.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.data_packet import DataPacket
+            >>> from vita49io.protocol.enums import PacketType, TSF
+            >>> DataPacket(packet_type=PacketType.IF_DATA_WITH_STREAM_ID, stream_id=1, tsf=TSF.FRACTIONAL).tsf
+            <TSF.FRACTIONAL: 2>
+        """
         return self.header.tsf
 
     @property
     def packet_count(self) -> int:
+        """Return the rolling packet count encoded in the header.
+
+        Args:
+            None.
+
+        Returns:
+            int: The lower 4-bit packet count value extracted from the header.
+
+        Raises:
+            None.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.data_packet import DataPacket
+            >>> from vita49io.protocol.enums import PacketType
+            >>> DataPacket(packet_type=PacketType.IF_DATA_WITH_STREAM_ID, stream_id=1, packet_count=3).packet_count
+            3
+        """
         return self.header.packet_count
 
     def __repr__(self) -> str:  # pragma: no cover - human-facing formatting
+        """Return a comprehensive string summary of the packet.
+
+        Args:
+            None.
+
+        Returns:
+            str: Human-readable fields for debugging sequences and payloads.
+
+        Raises:
+            None.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.data_packet import DataPacket
+            >>> repr(DataPacket(packet_type=PacketType.IF_DATA_WITH_STREAM_ID, stream_id=1))
+            'DataPacket(packet_type=IF_DATA_WITH_STREAM_ID, stream_id=0x00000001, payload_len=0, packet_count=0, requiresVita49_2=False)'
+        """
         def _hex32(v: int) -> str:
             return f"0x{v & 0xFFFFFFFF:08X}"
 
@@ -142,6 +289,27 @@ class DataPacket:
         return f"DataPacket({', '.join(parts)})"
 
     def to_bytes(self, payload_format: Optional[PayloadFormat] = None) -> bytes:
+        """Serialize the packet into raw VITA 49 bytes.
+
+        Args:
+            payload_format (Optional[PayloadFormat]): Optional payload format metadata used to decode IQ arrays when present.
+
+        Returns:
+            bytes: The serialized packet bytes including header, payload, and optional trailer.
+
+        Raises:
+            ValueError: If the packet type is not one of the supported data packet variants or required fields are missing.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.data_packet import DataPacket
+            >>> from vita49io.protocol.enums import PacketType
+            >>> pkt = DataPacket(packet_type=PacketType.IF_DATA_WITH_STREAM_ID, stream_id=1, payload=b"\x00\x00\x00\x00")
+            >>> isinstance(pkt.to_bytes(), bytes)
+            True
+        """
         if self.header.packet_type not in (
             PacketType.IF_DATA_WITHOUT_STREAM_ID,
             PacketType.IF_DATA_WITH_STREAM_ID,
@@ -192,6 +360,28 @@ class DataPacket:
 
     @staticmethod
     def from_bytes(data: bytes, payload_format: Optional[PayloadFormat] = None) -> "DataPacket":
+        """Construct a DataPacket from serialized VITA 49 bytes.
+
+        Args:
+            data (bytes): Raw packet bytes starting with the VITA 49 header word.
+            payload_format (Optional[PayloadFormat]): Optional payload metadata used to decode IQ samples.
+
+        Returns:
+            DataPacket: The decoded packet with header, payload, and optional IQ samples.
+
+        Raises:
+            ValueError: If the bytes are not a valid VITA 49 data packet or required fields are missing.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.data_packet import DataPacket
+            >>> from vita49io.protocol.enums import PacketType
+            >>> pkt = DataPacket(packet_type=PacketType.IF_DATA_WITH_STREAM_ID, stream_id=1, payload=b"\x00\x00\x00\x00")
+            >>> DataPacket.from_bytes(pkt.to_bytes()).stream_id
+            1
+        """
         if len(data) < 4 or len(data) % 4 != 0:
             raise ValueError("Invalid VRT packet length")
         words = [_unpack_u32_be(data[i : i + 4]) for i in range(0, len(data), 4)]

@@ -1,3 +1,24 @@
+"""Implement low-level helpers for VITA 49 header and payload encoding.
+
+Args:
+    None.
+
+Returns:
+    None.
+
+Raises:
+    None.
+
+Side Effects:
+    None.
+
+Examples:
+    >>> from vita49io.protocol.core import Header
+    >>> from vita49io.protocol.enums import PacketType, TSI, TSF
+    >>> Header(packet_type=PacketType.CONTEXT_PACKET, tsi=TSI.UTC, tsf=TSF.FRACTIONAL).packet_type
+    <PacketType.CONTEXT_PACKET: 4>
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -46,6 +67,34 @@ def _payload_words_to_bytes(words: List[int]) -> bytes:
 
 @dataclass
 class Header:
+    """Represent the 32-bit VITA 49 header word.
+
+    Args:
+        packet_type (PacketType): Packet type value encoded into the header.
+        class_id_present (bool): Indicates the presence of Class ID fields.
+        indicators_26 (bool): Packet Specific Indicator bit 26 flag.
+        indicators_25 (bool): Packet Specific Indicator bit 25 flag.
+        indicators_24 (bool): Packet Specific Indicator bit 24 flag.
+        tsi (TSI): Timestamp Integer mode selection.
+        tsf (TSF): Timestamp Fractional mode selection.
+        packet_count (int): Rolling 4-bit sequence counter.
+        packet_size (int): Packet size in 32-bit words including the header.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+
+    Side Effects:
+        None.
+
+    Examples:
+        >>> from vita49io.protocol.core import Header
+        >>> from vita49io.protocol.enums import PacketType
+        >>> Header(packet_type=PacketType.CONTEXT_PACKET).packet_size
+        0
+    """
     packet_type: PacketType
     class_id_present: bool = False
     # Packet Specific Indicator bits (26, 25, 24)
@@ -58,6 +107,26 @@ class Header:
     packet_size: int = 0  # total words
 
     def pack(self) -> int:
+        """Serialize the header fields into a 32-bit word.
+
+        Args:
+            None.
+
+        Returns:
+            int: The packed 32-bit header word encoded in big-endian bit order.
+
+        Raises:
+            ValueError: If `packet_count` is outside 0..15 or `packet_size` outside 0..65535.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.core import Header
+            >>> from vita49io.protocol.enums import PacketType
+            >>> Header(packet_type=PacketType.CONTEXT_PACKET).pack() >> 28
+            4
+        """
         if not (0 <= self.packet_count <= 0xF):
             raise ValueError("packet_count must be in 0..15")
         if not (0 <= self.packet_size <= 0xFFFF):
@@ -81,6 +150,26 @@ class Header:
         return _u32(w0)
 
     def __repr__(self) -> str:  # pragma: no cover - human-facing formatting
+        """Return a debug-friendly string representation of the header.
+
+        Args:
+            None.
+
+        Returns:
+            str: A descriptive string detailing header fields.
+
+        Raises:
+            None.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.core import Header
+            >>> from vita49io.protocol.enums import PacketType
+            >>> repr(Header(packet_type=PacketType.CONTEXT_PACKET))  # doctest: +NORMALIZE_WHITESPACE
+            'Header(packet_type=CONTEXT_PACKET, class_id_present=False, packet_count=0, packet_size=0)'
+        """
         parts: list[str] = []
         parts.append(f"packet_type={self.packet_type.name}")
         parts.append(f"class_id_present={self.class_id_present}")
@@ -100,6 +189,25 @@ class Header:
 
     @staticmethod
     def parse(w0: int) -> "Header":
+        """Build a Header instance by parsing a 32-bit word.
+
+        Args:
+            w0 (int): The 32-bit header word encoded in big-endian bit order.
+
+        Returns:
+            Header: A populated header instance reflecting the encoded values.
+
+        Raises:
+            ValueError: If the header bits map to an unknown PacketType, TSI, or TSF value.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.core import Header
+            >>> Header.parse(0x40000000).packet_type
+            <PacketType.CONTEXT_PACKET: 4>
+        """
         pkt_type = PacketType((w0 & _HDR_PACKET_TYPE_MASK) >> 28)
         c_present = bool(w0 & _HDR_C_MASK)
         # Parse Packet Specific Indicators uniformly from bits 26-24

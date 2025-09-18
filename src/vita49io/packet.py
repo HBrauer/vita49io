@@ -1,7 +1,21 @@
-"""
-Backward-compatibility shim for the previous single-file implementation.
+"""Provide backward-compatible packet re-exports for vita49io users.
 
-This module re-exports the public API moved to split modules.
+Args:
+    None.
+
+Returns:
+    None.
+
+Raises:
+    None.
+
+Side Effects:
+    Imports public protocol classes for legacy import paths.
+
+Examples:
+    >>> from vita49io.packet import DataPacket
+    >>> isinstance(DataPacket, type)
+    True
 """
 
 from .protocol.enums import PacketType, TSI, TSF
@@ -19,5 +33,4 @@ __all__ = [
     "DataPacket",
     "ContextPacket",
 ]
-
 

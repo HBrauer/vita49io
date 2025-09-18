@@ -1,7 +1,21 @@
-"""Protocol primitives for VITA 49.
+"""Expose protocol primitives for constructing and parsing VITA 49 packets.
 
-This subpackage contains the core data structures and helpers
-that implement the VITA 49 (VRT) protocol.
+Args:
+    None.
+
+Returns:
+    None.
+
+Raises:
+    None.
+
+Side Effects:
+    Imports commonly used protocol classes on subpackage import.
+
+Examples:
+    >>> from vita49io.protocol import DataPacket
+    >>> isinstance(DataPacket, type)
+    True
 """
 
 # Re-export common types for convenience when importing from vita49io.protocol
@@ -24,3 +38,4 @@ __all__ = [
     "SampleType",
     "DataItemFormat",
 ]
+

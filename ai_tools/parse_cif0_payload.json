@@ -1,0 +1,17 @@
+{
+  "name": "parse_cif0_payload",
+  "description": "Parse a CIF0 payload blob using CIF0Fields.parse.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "payload": {
+        "type": "string",
+        "description": "CIF0 payload bytes encoded as a hexadecimal string."
+      }
+    },
+    "required": [
+      "payload"
+    ],
+    "additionalProperties": false
+  }
+}

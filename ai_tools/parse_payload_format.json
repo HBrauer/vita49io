@@ -1,0 +1,22 @@
+{
+  "name": "parse_payload_format",
+  "description": "Decode CIF0 payload format words using PayloadFormat.parse.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "word0": {
+        "type": "integer",
+        "description": "First 32-bit word containing packing information."
+      },
+      "word1": {
+        "type": "integer",
+        "description": "Second 32-bit word containing repeat and vector counts."
+      }
+    },
+    "required": [
+      "word0",
+      "word1"
+    ],
+    "additionalProperties": false
+  }
+}

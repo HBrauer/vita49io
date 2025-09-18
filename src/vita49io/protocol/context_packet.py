@@ -1,3 +1,24 @@
+"""Provide helpers for constructing and parsing VITA 49 context packets.
+
+Args:
+    None.
+
+Returns:
+    None.
+
+Raises:
+    None.
+
+Side Effects:
+    None.
+
+Examples:
+    >>> from vita49io.protocol.context_packet import ContextPacket
+    >>> from vita49io.protocol.cif0 import CIF0Fields
+    >>> ContextPacket(packet_type=PacketType.CONTEXT_PACKET, stream_id=1, cif0=CIF0Fields()).cif0 is not None
+    True
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -20,6 +41,34 @@ from .vrt_types import ClassID
 
 @dataclass(init=False)
 class ContextPacket:
+    """Represent a VITA 49 context packet including CIF0 metadata.
+
+    Args:
+        header (Header): Pre-built header describing the packet layout.
+        cif0 (CIF0Fields): Mandatory CIF0 field structure describing context.
+        stream_id (Optional[int]): Stream identifier if the header indicates one.
+        class_id (Optional[ClassID]): Class identifier tuple attached to the packet.
+        integer_seconds (Optional[int]): Integer seconds timestamp component when TSI is set.
+        fractional_seconds (Optional[int]): Fractional seconds timestamp component when TSF is set.
+        cif_extra_masks (Optional[List[Tuple[int, int]]]): Additional CIF mask words beyond CIF0.
+        raw_cif_fields (Optional[List[int]]): Raw CIF field words not decoded into structures.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+
+    Side Effects:
+        None.
+
+    Examples:
+        >>> from vita49io.protocol.context_packet import ContextPacket
+        >>> from vita49io.protocol.cif0 import CIF0Fields
+        >>> from vita49io.protocol.enums import PacketType
+        >>> ContextPacket(packet_type=PacketType.CONTEXT_PACKET, stream_id=1, cif0=CIF0Fields()).stream_id
+        1
+    """
     header: Header
     # Required structured CIF0 describing context information. Set in __init__.
     cif0: Optional[CIF0Fields] = None
@@ -81,21 +130,126 @@ class ContextPacket:
     # Convenience accessors expected by tests/users
     @property
     def packet_type(self) -> PacketType:
+        """Return the packet type reported by the context packet header.
+
+        Args:
+            None.
+
+        Returns:
+            PacketType: The header packet type enumeration.
+
+        Raises:
+            None.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.context_packet import ContextPacket
+            >>> from vita49io.protocol.cif0 import CIF0Fields
+            >>> from vita49io.protocol.enums import PacketType
+            >>> ContextPacket(packet_type=PacketType.CONTEXT_PACKET, stream_id=1, cif0=CIF0Fields()).packet_type
+            <PacketType.CONTEXT_PACKET: 4>
+        """
         return self.header.packet_type
 
     @property
     def tsi(self) -> TSI:
+        """Return the Timestamp Integer (TSI) selection stored in the header.
+
+        Args:
+            None.
+
+        Returns:
+            TSI: The integer timestamp mode determining the presence of integer seconds.
+
+        Raises:
+            None.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.context_packet import ContextPacket
+            >>> from vita49io.protocol.cif0 import CIF0Fields
+            >>> from vita49io.protocol.enums import PacketType, TSI
+            >>> ContextPacket(packet_type=PacketType.CONTEXT_PACKET, stream_id=1, cif0=CIF0Fields(), tsi=TSI.UTC).tsi
+            <TSI.UTC: 1>
+        """
         return self.header.tsi
 
     @property
     def tsf(self) -> TSF:
+        """Return the Timestamp Fractional (TSF) selection stored in the header.
+
+        Args:
+            None.
+
+        Returns:
+            TSF: The fractional timestamp mode controlling fractional second interpretation.
+
+        Raises:
+            None.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.context_packet import ContextPacket
+            >>> from vita49io.protocol.cif0 import CIF0Fields
+            >>> from vita49io.protocol.enums import PacketType, TSF
+            >>> ContextPacket(packet_type=PacketType.CONTEXT_PACKET, stream_id=1, cif0=CIF0Fields(), tsf=TSF.FRACTIONAL).tsf
+            <TSF.FRACTIONAL: 2>
+        """
         return self.header.tsf
 
     @property
     def packet_count(self) -> int:
+        """Return the rolling packet count from the context packet header.
+
+        Args:
+            None.
+
+        Returns:
+            int: The 4-bit packet count sequence number.
+
+        Raises:
+            None.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.context_packet import ContextPacket
+            >>> from vita49io.protocol.cif0 import CIF0Fields
+            >>> from vita49io.protocol.enums import PacketType
+            >>> ContextPacket(packet_type=PacketType.CONTEXT_PACKET, stream_id=1, cif0=CIF0Fields(), packet_count=5).packet_count
+            5
+        """
         return self.header.packet_count
 
     def __repr__(self) -> str:  # pragma: no cover - human-facing formatting
+        """Generate a detailed string for debugging context packets.
+
+        Args:
+            None.
+
+        Returns:
+            str: A formatted string enumerating key header and CIF details.
+
+        Raises:
+            None.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.context_packet import ContextPacket
+            >>> from vita49io.protocol.cif0 import CIF0Fields
+            >>> from vita49io.protocol.enums import PacketType
+            >>> 'ContextPacket(' in repr(ContextPacket(packet_type=PacketType.CONTEXT_PACKET, stream_id=1, cif0=CIF0Fields()))
+            True
+        """
         def _hex32(v: int) -> str:
             return f"0x{v & 0xFFFFFFFF:08X}"
 
@@ -129,6 +283,28 @@ class ContextPacket:
         return f"ContextPacket({', '.join(parts)})"
 
     def to_bytes(self) -> bytes:
+        """Serialize the context packet into bytes.
+
+        Args:
+            None.
+
+        Returns:
+            bytes: The serialized packet including header and CIF fields.
+
+        Raises:
+            ValueError: If required fields such as packet type or Stream ID are inconsistent.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.context_packet import ContextPacket
+            >>> from vita49io.protocol.cif0 import CIF0Fields
+            >>> from vita49io.protocol.enums import PacketType
+            >>> pkt = ContextPacket(packet_type=PacketType.CONTEXT_PACKET, stream_id=1, cif0=CIF0Fields())
+            >>> isinstance(pkt.to_bytes(), bytes)
+            True
+        """
         if self.header.packet_type is not PacketType.CONTEXT_PACKET:
             raise ValueError("ContextPacket must have CONTEXT_PACKET packet_type")
         if self.stream_id is None:
@@ -164,6 +340,28 @@ class ContextPacket:
 
     @staticmethod
     def from_bytes(data: bytes) -> "ContextPacket":
+        """Parse a ContextPacket instance from serialized bytes.
+
+        Args:
+            data (bytes): Raw VITA 49 packet bytes beginning at the header.
+
+        Returns:
+            ContextPacket: A decoded context packet with parsed CIF0 fields.
+
+        Raises:
+            ValueError: If the bytes do not contain a valid context packet structure.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.context_packet import ContextPacket
+            >>> from vita49io.protocol.cif0 import CIF0Fields
+            >>> from vita49io.protocol.enums import PacketType
+            >>> pkt = ContextPacket(packet_type=PacketType.CONTEXT_PACKET, stream_id=1, cif0=CIF0Fields())
+            >>> ContextPacket.from_bytes(pkt.to_bytes()).stream_id
+            1
+        """
         if len(data) < 4 or len(data) % 4 != 0:
             raise ValueError("Invalid VRT packet length")
         words = [_unpack_u32_be(data[i : i + 4]) for i in range(0, len(data), 4)]

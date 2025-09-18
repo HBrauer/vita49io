@@ -1,0 +1,36 @@
+{
+  "name": "parse_data_packet",
+  "description": "Parse a VITA 49 data packet from bytes using vita49io.protocol.data_packet.DataPacket.from_bytes.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "data": {
+        "type": "string",
+        "description": "Packet bytes encoded as a hexadecimal string (no 0x prefix)."
+      },
+      "payload_format": {
+        "type": "object",
+        "description": "Optional payload format words used to decode IQ samples.",
+        "properties": {
+          "word0": {
+            "type": "integer",
+            "description": "First 32-bit word."
+          },
+          "word1": {
+            "type": "integer",
+            "description": "Second 32-bit word."
+          }
+        },
+        "required": [
+          "word0",
+          "word1"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "required": [
+      "data"
+    ],
+    "additionalProperties": false
+  }
+}

@@ -1,3 +1,23 @@
+"""Implement VITA 49 Context Indicator Field 0 (CIF0) helpers and enumerations.
+
+Args:
+    None.
+
+Returns:
+    None.
+
+Raises:
+    None.
+
+Side Effects:
+    None.
+
+Examples:
+    >>> from vita49io.protocol.cif0 import PayloadFormat
+    >>> PayloadFormat.parse(0x00000000, 0x00010001).repeat_count
+    1
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,17 +33,74 @@ from .core import _payload_bytes_to_words, _payload_words_to_bytes, _u32
 
 
 class PackingMethod(IntEnum):
+    """Enumerate CIF0 packing method options.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+
+    Side Effects:
+        None.
+
+    Examples:
+        >>> from vita49io.protocol.cif0 import PackingMethod
+        >>> PackingMethod.PROCESSING_EFFICIENT.value
+        0
+    """
     PROCESSING_EFFICIENT = 0
     LINK_EFFICIENT = 1
 
 
 class SampleType(IntEnum):
+    """Represent CIF0 sample type enumerations.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+
+    Side Effects:
+        None.
+
+    Examples:
+        >>> from vita49io.protocol.cif0 import SampleType
+        >>> SampleType.COMPLEX_CARTESIAN.name
+        'COMPLEX_CARTESIAN'
+    """
     REAL = 0
     COMPLEX_CARTESIAN = 1  # I/Q
     COMPLEX_POLAR = 2
 
 
 class DataItemFormat(IntEnum):
+    """Enumerate CIF0 data item format codes.
+
+    Args:
+        None.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+
+    Side Effects:
+        None.
+
+    Examples:
+        >>> from vita49io.protocol.cif0 import DataItemFormat
+        >>> DataItemFormat.IEEE754_SINGLE.value
+        14
+    """
     # 00000: Signed fixed-point (two's-complement), normalized [-1, 1-2^-(N-1)]
     SIGNED_FIXED_POINT = 0b00000
     IEEE754_SINGLE = 0b01110  # 32-bit float
@@ -32,6 +109,49 @@ class DataItemFormat(IntEnum):
 
 @dataclass
 class PayloadFormat:
+    """Describe the CIF0 payload format two-word structure.
+
+    Args:
+        packing_method (PackingMethod): Packing method bit (processing vs link efficient).
+        sample_type (SampleType): Sample type bit field describing complex vs real layout.
+        data_item_format_code (int): Raw five-bit data item format code.
+        sample_component_repeat (bool): Indicates repeated component ordering.
+        event_tag_size_bits (int): Width in bits for event tags.
+        channel_tag_size_bits (int): Width in bits for channel tags.
+        data_item_fraction_size_bits (int): Fractional bits count for fixed-point formats.
+        item_packing_field_size_bits (int): Total bits per packing field.
+        data_item_size_bits (int): Bits per data item.
+        repeat_count (int): Repeat count encoded in word two.
+        vector_size (int): Vector size encoded in word two.
+        data_item_format (Optional[DataItemFormat]): Optional friendly enum for the format code.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+
+    Side Effects:
+        None.
+
+    Examples:
+        >>> from vita49io.protocol.cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
+        >>> PayloadFormat(
+        ... packing_method=PackingMethod.PROCESSING_EFFICIENT,
+        ... sample_type=SampleType.COMPLEX_CARTESIAN,
+        ... data_item_format_code=int(DataItemFormat.IEEE754_SINGLE),
+        ... sample_component_repeat=False,
+        ... event_tag_size_bits=0,
+        ... channel_tag_size_bits=0,
+        ... data_item_fraction_size_bits=0,
+        ... item_packing_field_size_bits=32,
+        ... data_item_size_bits=32,
+        ... repeat_count=1,
+        ... vector_size=1,
+        ... data_item_format=DataItemFormat.IEEE754_SINGLE
+        ... ).repeat_count
+        1
+    """
     # Word 1 fields (bit positions per spec)
     packing_method: PackingMethod  # 0=processing-efficient, 1=link-efficient
     sample_type: SampleType  # 0=real, 1=complex cartesian, 2=complex polar
@@ -51,6 +171,26 @@ class PayloadFormat:
 
     @staticmethod
     def parse(w0: int, w1: int) -> "PayloadFormat":
+        """Decode a PayloadFormat from two 32-bit words.
+
+        Args:
+            w0 (int): First 32-bit word containing packing metadata.
+            w1 (int): Second 32-bit word containing repeat and vector sizes.
+
+        Returns:
+            PayloadFormat: Parsed structure capturing the payload layout.
+
+        Raises:
+            ValueError: If the data item format code is unsupported.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.cif0 import PayloadFormat
+            >>> PayloadFormat.parse(0x00000000, 0x00010001).vector_size
+            1
+        """
         w0 &= 0xFFFFFFFF
         w1 &= 0xFFFFFFFF
 
@@ -88,6 +228,38 @@ class PayloadFormat:
         )
 
     def pack_words(self) -> Tuple[int, int]:
+        """Encode the payload format back into two 32-bit words.
+
+        Args:
+            None.
+
+        Returns:
+            Tuple[int, int]: Pair of words corresponding to the CIF0 payload format fields.
+
+        Raises:
+            None.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
+            >>> PayloadFormat(
+            ... packing_method=PackingMethod.PROCESSING_EFFICIENT,
+            ... sample_type=SampleType.COMPLEX_CARTESIAN,
+            ... data_item_format_code=int(DataItemFormat.IEEE754_SINGLE),
+            ... sample_component_repeat=False,
+            ... event_tag_size_bits=0,
+            ... channel_tag_size_bits=0,
+            ... data_item_fraction_size_bits=0,
+            ... item_packing_field_size_bits=32,
+            ... data_item_size_bits=32,
+            ... repeat_count=1,
+            ... vector_size=1,
+            ... data_item_format=DataItemFormat.IEEE754_SINGLE
+            ... ).pack_words()[0] >> 31
+            0
+        """
         # Encode back to two 32-bit words
         w0 = 0
         w0 |= (int(self.packing_method) & 0x1) << 31
@@ -159,6 +331,43 @@ def _from_s16_fixed7(w: int) -> float:
 
 @dataclass
 class CIF0Fields:
+    """Represent the structured fields contained in CIF0 payloads.
+
+    Args:
+        context_field_change_indicator (bool): Indicates if fields have changed.
+        reference_point_identifier (Optional[int]): Optional stream identifier reference.
+        bandwidth_hz (Optional[float]): Receiver bandwidth in Hz.
+        if_reference_frequency_hz (Optional[float]): IF reference frequency in Hz.
+        rf_reference_frequency_hz (Optional[float]): RF reference frequency in Hz.
+        rf_reference_frequency_offset_hz (Optional[float]): RF frequency offset in Hz.
+        if_band_offset_hz (Optional[float]): IF band offset in Hz.
+        reference_level_dbm (Optional[float]): Reference level in dBm.
+        gain_db (Optional[Tuple[float, float]]): Optional (gain1, gain2) tuple in dB.
+        over_range_count (Optional[int]): Overrange counter value.
+        sample_rate_hz (Optional[float]): Sample rate in Hz.
+        timestamp_adjustment_fs (Optional[int]): Timestamp adjustment in femtoseconds.
+        timestamp_calibration_time_s (Optional[int]): Timestamp calibration integer seconds.
+        temperature_c (Optional[int]): Temperature in Celsius (signed).
+        device_identifier (Optional[Tuple[int, int]]): Device identifier (OUI, device).
+        state_event_indicators (Optional[int]): State and event indicator bits.
+        data_packet_payload_format (Optional[Tuple[int, int]]): Raw payload format words.
+        payload_format (Optional[PayloadFormat]): Parsed payload format helper.
+        raw_low_bits (int): Unparsed lower mask bits reserved for future use.
+
+    Returns:
+        None.
+
+    Raises:
+        None.
+
+    Side Effects:
+        None.
+
+    Examples:
+        >>> from vita49io.protocol.cif0 import CIF0Fields
+        >>> CIF0Fields().sample_rate_hz is None
+        True
+    """
     # Bit 31
     context_field_change_indicator: bool = False  
     # Bit 30
@@ -236,6 +445,25 @@ class CIF0Fields:
         return m
 
     def pack(self) -> bytes:
+        """Serialize the CIF0 fields into bytes beginning with the mask word.
+
+        Args:
+            None.
+
+        Returns:
+            bytes: Serialized CIF0 payload including mask and encoded fields.
+
+        Raises:
+            None.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.cif0 import CIF0Fields
+            >>> CIF0Fields().pack()[:4]
+            b"\x00\x00\x00\x00"
+        """
         words: List[int] = []
         words.append(self._presence_mask() & 0xFFFFFFFF)
 
@@ -294,9 +522,25 @@ class CIF0Fields:
 
     @staticmethod
     def parse_from_mask(mask: int, field_words: List[int]) -> Tuple["CIF0Fields", int]:
-        """Parse CIF0 fields given a known presence mask and subsequent words.
+        """Interpret CIF0 fields based on a mask word and payload words.
 
-        Returns (cif0, words_consumed_for_fields). Does not include the mask word.
+        Args:
+            mask (int): CIF0 mask word indicating which fields are present.
+            field_words (List[int]): Subsequent 32-bit words holding encoded field data.
+
+        Returns:
+            Tuple[CIF0Fields, int]: Parsed fields and the number of words consumed.
+
+        Raises:
+            ValueError: If the mask requires more field words than provided.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.cif0 import CIF0Fields
+            >>> CIF0Fields.parse_from_mask(0, [])[1]
+            0
         """
 
         # Reject unsupported lower bits explicitly requested by caller
@@ -402,9 +646,24 @@ class CIF0Fields:
 
     @staticmethod
     def parse(payload: bytes) -> Tuple["CIF0Fields", int]:
-        """Parse CIF0 payload. Returns (cif0, bytes_consumed).
+        """Parse a CIF0 payload from bytes and report the number of bytes consumed.
 
-        Expects fields to be encoded in descending bit order (31 -> 15).
+        Args:
+            payload (bytes): Raw CIF0 payload beginning with the mask word.
+
+        Returns:
+            Tuple[CIF0Fields, int]: Parsed fields and the number of bytes consumed.
+
+        Raises:
+            ValueError: If the payload is empty or malformed.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.protocol.cif0 import CIF0Fields
+            >>> CIF0Fields.parse(b"\x00\x00\x00\x00")[1]
+            4
         """
         words = _payload_bytes_to_words(payload)
         if not words:

@@ -1,0 +1,73 @@
+{
+  "name": "serialize_data_packet",
+  "description": "Create and serialize a VITA 49 data packet via vita49io.protocol.data_packet.DataPacket.to_bytes.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "packet_type": {
+        "type": "string",
+        "description": "PacketType enum name (e.g. 'IF_DATA_WITH_STREAM_ID')."
+      },
+      "stream_id": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "description": "Stream ID value or null for packet types without stream IDs."
+      },
+      "class_id": {
+        "type": [
+          "array",
+          "null"
+        ],
+        "description": "Optional class ID tuple [oui, information_class, packet_class].",
+        "items": {
+          "type": "integer"
+        },
+        "minItems": 3,
+        "maxItems": 3
+      },
+      "integer_seconds": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "description": "Integer seconds timestamp."
+      },
+      "fractional_seconds": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "description": "Fractional seconds timestamp."
+      },
+      "payload": {
+        "type": "string",
+        "description": "Payload bytes encoded as a hexadecimal string."
+      },
+      "packet_count": {
+        "type": "integer",
+        "description": "4-bit packet counter value.",
+        "minimum": 0,
+        "maximum": 15
+      },
+      "requires_vita49_2": {
+        "type": "boolean",
+        "description": "Set indicator bit 25 when true."
+      },
+      "trailer": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "description": "Optional 32-bit trailer word."
+      }
+    },
+    "required": [
+      "packet_type",
+      "payload",
+      "packet_count"
+    ],
+    "additionalProperties": false
+  }
+}

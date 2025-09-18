@@ -1,3 +1,23 @@
+"""Provide shared type aliases for VITA 49 identifiers.
+
+Args:
+    None.
+
+Returns:
+    None.
+
+Raises:
+    None.
+
+Side Effects:
+    None.
+
+Examples:
+    >>> from vita49io.protocol.vrt_types import ClassID
+    >>> ClassID.__args__
+    (<class 'int'>, <class 'int'>, <class 'int'>)
+"""
+
 from __future__ import annotations
 
 from typing import Tuple

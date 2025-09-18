@@ -1,3 +1,23 @@
+"""Provide high-level helpers for generating VITA 49 IQ data streams.
+
+Args:
+    None.
+
+Returns:
+    None.
+
+Raises:
+    None.
+
+Side Effects:
+    None.
+
+Examples:
+    >>> from vita49io.io.iq_writer import IQStreamWriter
+    >>> isinstance(IQStreamWriter, type)
+    True
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -48,16 +68,51 @@ def _to_vrt_time(t_epoch_s: float) -> Tuple[int, int]:
 
 @dataclass
 class IQStreamWriter:
-    """Build VITA 49 data/context packets for an IQ stream.
+    """Coordinate VITA 49 IQ data and context packet generation.
 
-    Configure once with meta information (stream ID, sample rate, payload
-    format, etc.). For each block of IQ samples, call build_data_packet() to get
-    a DataPacket or build_data_packet_bytes() for serialized bytes. Request a
-    context packet anytime via build_context_packet().
+    Args:
+        stream_id (int): Stream identifier written into generated packets.
+        sample_rate_hz (float): Sample rate used to compute timestamps.
+        payload_format (Optional[PayloadFormat]): Explicit payload format to reuse across packets.
+        data_item_format (DataItemFormat): Data item format used when deriving payload_format.
+        item_packing_field_size_bits (int): Packing field width for derived payload formats.
+        data_item_size_bits (int): Per-sample data item width for derived payload formats.
+        sample_component_repeat (bool): Whether components repeat when deriving payload format.
+        repeat_count (int): Repeat count used for vector payloads.
+        vector_size (int): Vector size for complex payloads.
+        packet_type (PacketType): Packet type used for emitted data packets.
+        tsi (TSI): Timestamp Integer selection for emitted packets.
+        tsf (TSF): Timestamp Fractional selection for emitted packets.
+        class_id (Optional[ClassID]): Class identifier to attach to packets.
+        requires_vita49_2 (bool): Flag to set V49.2 indicator bit.
+        start_time_epoch_s (Optional[float]): Initial epoch time for packet timestamps.
+        bandwidth_hz (Optional[float]): Optional CIF0 bandwidth metadata.
+        if_reference_frequency_hz (Optional[float]): Optional CIF0 IF reference frequency.
+        rf_reference_frequency_hz (Optional[float]): Optional CIF0 RF reference frequency.
+        rf_reference_frequency_offset_hz (Optional[float]): Optional CIF0 RF frequency offset.
+        if_band_offset_hz (Optional[float]): Optional CIF0 IF band offset.
+        reference_level_dbm (Optional[float]): Optional CIF0 reference level.
+        gain_db (Optional[Tuple[float, float]]): Optional CIF0 gain tuple.
+        device_identifier (Optional[Tuple[int, int]]): Optional CIF0 device identifier.
+        state_event_indicators (Optional[int]): Optional CIF0 state/event indicators.
+        context_timestamp_mode_general (bool): Whether to set the CIF timestamp mode bit.
 
-    Time handling: maintains a time cursor starting at start_time (default now)
-    and advances it by N / sample_rate for each data packet built. Timestamps
-    are expressed with TSI/TSF (default UTC + FRACTIONAL).
+    Returns:
+        None.
+
+    Raises:
+        ValueError: If the configuration is inconsistent (for example, invalid sample rate).
+
+    Side Effects:
+        Maintains internal counters used to advance timestamps per emitted packet.
+
+    Examples:
+        >>> import numpy as np
+        >>> from vita49io.io.iq_writer import IQStreamWriter
+        >>> writer = IQStreamWriter(stream_id=1, sample_rate_hz=1e6)
+        >>> pkt = writer.build_data_packet(np.zeros(4, dtype=np.complex64))
+        >>> pkt.stream_id
+        1
     """
 
     # Required
@@ -102,6 +157,25 @@ class IQStreamWriter:
     _packet_count: int = 0
 
     def __post_init__(self) -> None:
+        """Validate IQStreamWriter configuration after dataclass initialization.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            ValueError: If required fields such as `stream_id` or `sample_rate_hz` are invalid.
+
+        Side Effects:
+            May derive a PayloadFormat instance and initialize internal counters.
+
+        Examples:
+            >>> from vita49io.io.iq_writer import IQStreamWriter
+            >>> IQStreamWriter(stream_id=1, sample_rate_hz=1e6)  # doctest: +ELLIPSIS
+            IQStreamWriter(stream_id=1, sample_rate_hz=1000000.0, ...
+        """
         if self.stream_id is None:
             raise ValueError("stream_id is required")
         if self.sample_rate_hz <= 0:
@@ -136,16 +210,51 @@ class IQStreamWriter:
     # ---------- Public API ----------
 
     def current_time(self) -> Tuple[int, int]:
-        """Return current (integer_seconds, fractional_seconds) based on time cursor."""
+        """Return the current VITA 49 timestamp cursor as integer and fractional seconds.
+
+        Args:
+            None.
+
+        Returns:
+            Tuple[int, int]: Pair of integer and 64-bit fractional seconds representing the current cursor.
+
+        Raises:
+            None.
+
+        Side Effects:
+            None.
+
+        Examples:
+            >>> from vita49io.io.iq_writer import IQStreamWriter
+            >>> writer = IQStreamWriter(stream_id=1, sample_rate_hz=1e6)
+            >>> isinstance(writer.current_time(), tuple)
+            True
+        """
         t = self.start_time_epoch_s + (self._samples_emitted / float(self.sample_rate_hz))  # type: ignore[operator]
         return _to_vrt_time(t)
 
     def build_data_packet(self, iq: "np.ndarray") -> DataPacket:
-        """Create a DataPacket for the given IQ block and advance time cursor.
+        """Build a DataPacket containing the provided IQ samples and advance the cursor.
 
-        The returned packet includes stream ID, class ID (if provided),
-        timestamps per configured TSI/TSF, and IQ samples attached in the
-        `iq` field. Serialize via packet.to_bytes(payload_format=self.payload_format).
+        Args:
+            iq (np.ndarray): Complex or interleaved IQ samples to attach to the packet.
+
+        Returns:
+            DataPacket: Packet populated with IQ data and updated timestamps.
+
+        Raises:
+            ValueError: If the IQ array is not complex or shaped as (N, 2).
+
+        Side Effects:
+            Updates the internal sample counter and packet count.
+
+        Examples:
+            >>> import numpy as np
+            >>> from vita49io.io.iq_writer import IQStreamWriter
+            >>> writer = IQStreamWriter(stream_id=1, sample_rate_hz=1e6)
+            >>> pkt = writer.build_data_packet(np.zeros(4, dtype=np.complex64))
+            >>> pkt.iq.shape[0]
+            4
         """
         # Determine number of IQ samples
         arr = np.asarray(iq)
@@ -186,15 +295,51 @@ class IQStreamWriter:
         return pkt
 
     def build_data_packet_bytes(self, iq: "np.ndarray") -> bytes:
-        """Build and serialize a data packet for the provided IQ block."""
+        """Build and serialize a data packet for the provided IQ block.
+
+        Args:
+            iq (np.ndarray): Complex or interleaved IQ samples to encode.
+
+        Returns:
+            bytes: Serialized VITA 49 data packet bytes.
+
+        Raises:
+            ValueError: If IQ validation in `build_data_packet` fails.
+
+        Side Effects:
+            Advances the internal timestamp cursor via `build_data_packet`.
+
+        Examples:
+            >>> import numpy as np
+            >>> from vita49io.io.iq_writer import IQStreamWriter
+            >>> writer = IQStreamWriter(stream_id=1, sample_rate_hz=1e6)
+            >>> payload = writer.build_data_packet_bytes(np.zeros(4, dtype=np.complex64))
+            >>> isinstance(payload, bytes)
+            True
+        """
         pkt = self.build_data_packet(iq)
         return pkt.to_bytes(payload_format=self.payload_format)
 
     def build_context_packet(self) -> ContextPacket:
-        """Create a ContextPacket reflecting current configuration and time.
+        """Create a ContextPacket representing the current stream configuration.
 
-        Includes sample_rate and payload format (CIF0 bit 21 and 15), and any
-        optional metadata provided at construction time.
+        Args:
+            None.
+
+        Returns:
+            ContextPacket: Packet with CIF0 metadata and the current timestamp cursor.
+
+        Raises:
+            None.
+
+        Side Effects:
+            Increments the internal packet counter for subsequent packets.
+
+        Examples:
+            >>> from vita49io.io.iq_writer import IQStreamWriter
+            >>> writer = IQStreamWriter(stream_id=1, sample_rate_hz=1e6)
+            >>> writer.build_context_packet().cif0 is not None
+            True
         """
         integer_seconds, fractional_seconds = self.current_time()
 
@@ -244,7 +389,28 @@ class IQStreamWriter:
     # ---------- Utilities ----------
 
     def reset_time(self, start_time: Optional[Union[float, datetime]] = None) -> None:
-        """Reset time cursor to provided epoch time (or now) and zero sample count."""
+        """Reset the timestamp cursor to a specific starting time.
+
+        Args:
+            start_time (Optional[Union[float, datetime]]): Epoch seconds or datetime to anchor future packets.
+
+        Returns:
+            None.
+
+        Raises:
+            None.
+
+        Side Effects:
+            Updates the stored start time and clears the emitted sample count.
+
+        Examples:
+            >>> from datetime import datetime
+            >>> from vita49io.io.iq_writer import IQStreamWriter
+            >>> writer = IQStreamWriter(stream_id=1, sample_rate_hz=1e6)
+            >>> writer.reset_time(datetime.utcfromtimestamp(0))
+            >>> writer._samples_emitted
+            0
+        """
         if isinstance(start_time, datetime):
             if start_time.tzinfo is None:
                 # Treat naive datetime as UTC
@@ -259,7 +425,27 @@ class IQStreamWriter:
         self._samples_emitted = 0
 
     def advance_samples(self, n_samples: int) -> None:
-        """Advance internal time cursor by a number of IQ samples."""
+        """Advance the timestamp cursor by a number of IQ samples.
+
+        Args:
+            n_samples (int): Number of IQ samples to add to the emitted total.
+
+        Returns:
+            None.
+
+        Raises:
+            ValueError: If `n_samples` is negative.
+
+        Side Effects:
+            Updates the internal emitted sample counter.
+
+        Examples:
+            >>> from vita49io.io.iq_writer import IQStreamWriter
+            >>> writer = IQStreamWriter(stream_id=1, sample_rate_hz=1e6)
+            >>> writer.advance_samples(10)
+            >>> writer._samples_emitted
+            10
+        """
         if n_samples < 0:
             raise ValueError("n_samples must be >= 0")
         self._samples_emitted += int(n_samples)

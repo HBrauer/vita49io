@@ -1,0 +1,29 @@
+{
+  "name": "iq_writer_build_context_packet",
+  "description": "Produce a ContextPacket snapshot via IQStreamWriter.build_context_packet.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "stream_id": {
+        "type": "integer",
+        "description": "Stream identifier for the writer."
+      },
+      "sample_rate_hz": {
+        "type": "number",
+        "description": "Sample rate used for CIF0 metadata."
+      },
+      "bandwidth_hz": {
+        "type": [
+          "number",
+          "null"
+        ],
+        "description": "Optional bandwidth hint stored in CIF0."
+      }
+    },
+    "required": [
+      "stream_id",
+      "sample_rate_hz"
+    ],
+    "additionalProperties": false
+  }
+}

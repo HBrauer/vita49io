@@ -1,0 +1,32 @@
+{
+  "name": "iq_writer_build_data_packet",
+  "description": "Use IQStreamWriter.build_data_packet to generate a DataPacket with synchronized timestamps.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "stream_id": {
+        "type": "integer",
+        "description": "Stream identifier passed to IQStreamWriter."
+      },
+      "sample_rate_hz": {
+        "type": "number",
+        "description": "Sample rate in Hz used for timestamp advancement."
+      },
+      "iq": {
+        "type": "array",
+        "description": "Flattened list of complex samples represented as alternating real and imaginary float pairs.",
+        "items": {
+          "type": "number"
+        },
+        "minItems": 2,
+        "additionalItems": true
+      }
+    },
+    "required": [
+      "stream_id",
+      "sample_rate_hz",
+      "iq"
+    ],
+    "additionalProperties": false
+  }
+}

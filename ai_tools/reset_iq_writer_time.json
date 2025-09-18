@@ -1,0 +1,29 @@
+{
+  "name": "iq_writer_reset_time",
+  "description": "Reset the IQStreamWriter time cursor via IQStreamWriter.reset_time.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "stream_id": {
+        "type": "integer",
+        "description": "Stream identifier for the writer instance."
+      },
+      "sample_rate_hz": {
+        "type": "number",
+        "description": "Sample rate supplied when building the writer."
+      },
+      "start_time_epoch_s": {
+        "type": [
+          "number",
+          "null"
+        ],
+        "description": "New starting epoch seconds. Null falls back to current UTC time."
+      }
+    },
+    "required": [
+      "stream_id",
+      "sample_rate_hz"
+    ],
+    "additionalProperties": false
+  }
+}

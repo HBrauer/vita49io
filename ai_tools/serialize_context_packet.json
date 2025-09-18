@@ -1,0 +1,57 @@
+{
+  "name": "serialize_context_packet",
+  "description": "Create and serialize a context packet with vita49io.protocol.context_packet.ContextPacket.to_bytes.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "stream_id": {
+        "type": "integer",
+        "description": "Stream identifier to embed."
+      },
+      "packet_count": {
+        "type": "integer",
+        "description": "4-bit packet counter value.",
+        "minimum": 0,
+        "maximum": 15
+      },
+      "tsi": {
+        "type": "string",
+        "description": "TSI enum name (e.g. 'UTC')."
+      },
+      "tsf": {
+        "type": "string",
+        "description": "TSF enum name (e.g. 'FRACTIONAL')."
+      },
+      "payload_format_words": {
+        "type": "array",
+        "description": "Optional two-word payload format tuple to store in CIF0 bit 15.",
+        "items": {
+          "type": "integer"
+        },
+        "minItems": 2,
+        "maxItems": 2
+      },
+      "sample_rate_hz": {
+        "type": [
+          "number",
+          "null"
+        ],
+        "description": "Optional CIF0 sample rate in Hz."
+      },
+      "bandwidth_hz": {
+        "type": [
+          "number",
+          "null"
+        ],
+        "description": "Optional CIF0 bandwidth in Hz."
+      }
+    },
+    "required": [
+      "stream_id",
+      "packet_count",
+      "tsi",
+      "tsf"
+    ],
+    "additionalProperties": false
+  }
+}
