@@ -14,7 +14,9 @@ Install
 -------
 
 ```bash
-pip install .
+pip install . # from source
+# or
+pip install git+https://github.com/HBrauer/vita49io.git # directly from GitHub
 ```
 
 Or use directly from source (examples add `src/` to `PYTHONPATH`).
