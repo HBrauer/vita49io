@@ -29,6 +29,29 @@ from .vrt_types import ClassID
 from .cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
 
 
+_DEFAULT_REFERENCE_IMPEDANCE_OHMS = 50.0
+
+
+def _reflevel_dbm_to_vpk(reference_level_dbm: float) -> float:
+    # Convert power in dBm to power in watts
+    power_w = 10.0 ** ((float(reference_level_dbm) - 30.0) / 10.0)
+    return float(np.sqrt(2.0 * _DEFAULT_REFERENCE_IMPEDANCE_OHMS * power_w))
+
+
+def _normalize_iq_to_reference_level(
+    iq: "np.ndarray",
+    reference_level_dbm: float,
+) -> "np.ndarray":
+    ref_dbm = float(reference_level_dbm)
+    if not np.isfinite(ref_dbm):
+        raise ValueError("reference_level_dbm must be finite")
+    vpk = _reflevel_dbm_to_vpk(ref_dbm)
+    if not np.isfinite(vpk) or vpk <= 0.0:
+        raise ValueError("Computed peak voltage must be finite and positive")
+    scale = 1.0 / vpk
+    return np.asarray(iq) * scale
+
+
 @dataclass(init=False)
 class DataPacket:
     """Represent a VITA 49 data packet. These packets carry the raw, high-rate signal samples (I and Q data). The payload of a Data Packet is a contiguous stream of binary values representing the digitized RF signal over time.
@@ -230,11 +253,19 @@ class DataPacket:
             parts.append(f"iq_len={n}")
         return f"DataPacket({', '.join(parts)})"
 
-    def to_bytes(self, payload_format: Optional[PayloadFormat] = None) -> bytes:
+    def to_bytes(
+        self,
+        payload_format: Optional[PayloadFormat] = None,
+        *,
+        reference_level_dbm: Optional[float] = None,
+    ) -> bytes:
         """Serialize the packet into raw VITA 49 bytes.
 
         Args:
             payload_format (Optional[PayloadFormat]): Optional payload format metadata used to decode IQ arrays when present.
+            reference_level_dbm (Optional[float]): When provided together with IQ samples,
+                normalize the samples using the given reference level (dBmFS)
+                before quantization. Requires `payload_format`.
 
         Returns:
             bytes: The serialized packet bytes including header, payload, and optional trailer.
@@ -275,6 +306,16 @@ class DataPacket:
         if self.header.indicators_26 and self.trailer is None:
             raise ValueError("Packet type requires a trailer, but none provided")
 
+        if reference_level_dbm is not None:
+            if payload_format is None:
+                raise ValueError(
+                    "reference_level_dbm requires payload_format when encoding IQ data"
+                )
+            if self.iq is None:
+                raise ValueError(
+                    "reference_level_dbm provided but packet was constructed without IQ samples"
+                )
+
         common = _Common(
             header=self.header,
             stream_id=self.stream_id,
@@ -288,7 +329,13 @@ class DataPacket:
         # into payload bytes according to the supported subset. Otherwise use
         # raw payload bytes as-is for backward compatibility.
         if self.iq is not None and payload_format is not None:
-            payload_bytes = _encode_iq_payload(self.iq, payload_format)
+            iq_values = self.iq
+            if reference_level_dbm is not None:
+                iq_values = _normalize_iq_to_reference_level(
+                    iq_values,
+                    reference_level_dbm,
+                )
+            payload_bytes = _encode_iq_payload(iq_values, payload_format)
         else:
             payload_bytes = self.payload
 

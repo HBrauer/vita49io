@@ -32,6 +32,8 @@ def main(argv: list[str]) -> int:
     w = IQStreamWriter(
         stream_id=stream_id,
         sample_rate_hz=fs,
+        # reference_level_dbm=-3.0,  # Uncomment to encode voltage-domain samples
+        # normalize_iq_to_reference_level=True,
         # Defaults already set to 32-bit float complex I/Q
     )
 

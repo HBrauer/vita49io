@@ -109,6 +109,7 @@ open("out.v49", "wb").write(out)
 - Time handling: timestamps start at `start_time_epoch_s` (default now, UTC) and advance by `len(iq)/sample_rate_hz` for each packet.
 - Timestamps are emitted using `tsi`/`tsf` (defaults: `UTC` + `FRACTIONAL`).
 - To use fixed‑point payloads, build a `PayloadFormat` and pass it to the writer via constructor fields; it propagates to context and data encoding.
+- To scale voltage-domain IQ automatically, set `reference_level_dbm` and `normalize_iq_to_reference_level=True` on `IQStreamWriter`. The helper converts the reference level (dBmFS) into a 50-ohm peak voltage before normalizing samples. You can call `DataPacket.to_bytes(..., reference_level_dbm=...)` directly when constructing packets by hand.
 
 ## 6. Explore the API reference
 

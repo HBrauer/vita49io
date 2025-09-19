@@ -80,6 +80,8 @@ class IQStreamWriter:
         rf_reference_frequency_offset_hz (Optional[float]): Optional CIF0 RF frequency offset.
         if_band_offset_hz (Optional[float]): Optional CIF0 IF band offset.
         reference_level_dbm (Optional[float]): Optional CIF0 reference level.
+        normalize_iq_to_reference_level (bool): Whether to scale IQ samples to unit
+            amplitude using the configured reference level before encoding.
         gain_db (Optional[Tuple[float, float]]): Optional CIF0 gain tuple.
         device_identifier (Optional[Tuple[int, int]]): Optional CIF0 device identifier.
         state_event_indicators (Optional[int]): Optional CIF0 state/event indicators.
@@ -133,6 +135,7 @@ class IQStreamWriter:
     rf_reference_frequency_offset_hz: Optional[float] = None
     if_band_offset_hz: Optional[float] = None
     reference_level_dbm: Optional[float] = None
+    normalize_iq_to_reference_level: bool = False
     gain_db: Optional[Tuple[float, float]] = None
     device_identifier: Optional[Tuple[int, int]] = None  # (OUI 24-bit, device 32-bit)
     state_event_indicators: Optional[int] = None
@@ -306,7 +309,12 @@ class IQStreamWriter:
             True
         """
         pkt = self.build_data_packet(iq)
-        return pkt.to_bytes(payload_format=self.payload_format)
+        kwargs = {"payload_format": self.payload_format}
+        if self.normalize_iq_to_reference_level:
+            if self.reference_level_dbm is None:
+                raise ValueError("normalize_iq_to_reference_level is True but reference_level_dbm is not set")
+            kwargs["reference_level_dbm"] = self.reference_level_dbm
+        return pkt.to_bytes(**kwargs)
 
     def build_context_packet(self) -> ContextPacket:
         """Create a ContextPacket representing the current stream configuration.
