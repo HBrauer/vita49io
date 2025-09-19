@@ -487,7 +487,8 @@ def _encode_iq_payload(iq: "np.ndarray", pf: PayloadFormat) -> bytes:
     # Fast path: 32-bit fields
     if ipf == 32 and di == 32:
         if fmt == DataItemFormat.IEEE754_SINGLE:
-            return vals.astype(">f4").tobytes()
+            vals_c = np.clip(vals, -1.0, 1.0)
+            return vals_c.astype(">f4").tobytes()
         if fmt == DataItemFormat.SIGNED_FIXED_POINT:
             # Perform arithmetic in float64 to reduce rounding artifacts
             scale = float(1 << 31)

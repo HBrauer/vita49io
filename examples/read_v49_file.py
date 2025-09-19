@@ -83,11 +83,11 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("input_file", help="Path to input VITA49 binary file")
     parser.add_argument(
-        "-n",
-        "--max-packets",
+        '-n',
+        '--max-packets',
         type=int,
         default=None,
-        help="Maximum number of packets to read (default: all)",
+        help='Maximum number of packets to read (default: all)',
     )
     return parser.parse_args(argv)
 
