@@ -1,16 +1,4 @@
-"""Provide high-level helpers for generating VITA 49 IQ data streams.
-
-Args:
-    None.
-
-Returns:
-    None.
-
-Raises:
-    None.
-
-Side Effects:
-    None.
+"""Provide high-level helpers for generating VITA 49 IQ data streams. IQStreamWriter produces context and data packets for a configured IQ stream and advances timestamps based on the sample rate.
 
 Examples:
     >>> from vita49io.io.iq_writer import IQStreamWriter

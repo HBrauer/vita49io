@@ -31,7 +31,7 @@ from .cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
 
 @dataclass(init=False)
 class DataPacket:
-    """Represent a VITA 49 data packet with optional IQ payload helpers.
+    """Represent a VITA 49 data packet. These packets carry the raw, high-rate signal samples (I and Q data). The payload of a Data Packet is a contiguous stream of binary values representing the digitized RF signal over time.
 
     Args:
         header (Header): Pre-built header to attach to the packet.
@@ -46,8 +46,16 @@ class DataPacket:
     Examples:
         >>> from vita49io.protocol.data_packet import DataPacket
         >>> from vita49io.protocol.enums import PacketType
-        >>> DataPacket(packet_type=PacketType.IF_DATA_WITH_STREAM_ID, stream_id=1).stream_id
-        1
+        >>> payload = np.array([1.0, 0.0, 0.0, 1.0], dtype=">f4").tobytes()
+        >>> pkt = DataPacket(
+            packet_type=PacketType.IF_DATA_WITH_STREAM_ID,
+            stream_id=1,
+            tsi=TSI.UTC,
+            tsf=TSF.FRACTIONAL,
+            integer_seconds=1_700_000_000,
+            fractional_seconds=0,
+            payload=payload,  # raw payload goes here
+
     """
     header: Header
     stream_id: Optional[int] = None

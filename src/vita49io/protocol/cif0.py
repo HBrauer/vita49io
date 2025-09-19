@@ -35,18 +35,6 @@ from .core import _payload_bytes_to_words, _payload_words_to_bytes, _u32
 class PackingMethod(IntEnum):
     """Enumerate CIF0 packing method options.
 
-    Args:
-        None.
-
-    Returns:
-        None.
-
-    Raises:
-        None.
-
-    Side Effects:
-        None.
-
     Examples:
         >>> from vita49io.protocol.cif0 import PackingMethod
         >>> PackingMethod.PROCESSING_EFFICIENT.value
@@ -59,18 +47,6 @@ class PackingMethod(IntEnum):
 class SampleType(IntEnum):
     """Represent CIF0 sample type enumerations.
 
-    Args:
-        None.
-
-    Returns:
-        None.
-
-    Raises:
-        None.
-
-    Side Effects:
-        None.
-
     Examples:
         >>> from vita49io.protocol.cif0 import SampleType
         >>> SampleType.COMPLEX_CARTESIAN.name
@@ -82,34 +58,23 @@ class SampleType(IntEnum):
 
 
 class DataItemFormat(IntEnum):
-    """Enumerate CIF0 data item format codes.
-
-    Args:
-        None.
-
-    Returns:
-        None.
-
-    Raises:
-        None.
-
-    Side Effects:
-        None.
+    """Enumerate Payload data item format codes.
 
     Examples:
         >>> from vita49io.protocol.cif0 import DataItemFormat
         >>> DataItemFormat.IEEE754_SINGLE.value
         14
     """
-    # 00000: Signed fixed-point (two's-complement), normalized [-1, 1-2^-(N-1)]
-    SIGNED_FIXED_POINT = 0b00000
-    IEEE754_SINGLE = 0b01110  # 32-bit float
-    # 10000: Unsigned fixed-point, normalized [0, 1-2^-N]
-    UNSIGNED_FIXED_POINT = 0b10000
+    
+    SIGNED_FIXED_POINT = 0b00000 # Signed fixed-point (two's-complement), normalized [-1, 1-2^-(N-1)]
+    UNSIGNED_FIXED_POINT = 0b10000 # Unsigned fixed-point, normalized [0, 1-2^-N]
+    IEEE754_SINGLE = 0b01110  # Standard 32 float.       
+    
+
 
 @dataclass
 class PayloadFormat:
-    """Describe the CIF0 payload format two-word structure.
+    """Describe the payload format two-word structure.
 
     Args:
         packing_method (PackingMethod): Packing method bit (processing vs link efficient).
@@ -124,15 +89,6 @@ class PayloadFormat:
         repeat_count (int): Repeat count encoded in word two.
         vector_size (int): Vector size encoded in word two.
         data_item_format (Optional[DataItemFormat]): Optional friendly enum for the format code.
-
-    Returns:
-        None.
-
-    Raises:
-        None.
-
-    Side Effects:
-        None.
 
     Examples:
         >>> from vita49io.protocol.cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
