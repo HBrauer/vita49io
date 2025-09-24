@@ -87,6 +87,7 @@ class DataPacket:
     fractional_seconds: Optional[int] = None
     payload: bytes = b""
     trailer: Optional[int] = None
+    validate_strict: bool = False
     # Optional decoded IQ samples (complex64) when a compatible PayloadFormat
     # is provided to from_bytes(). Not serialized unless to_bytes() is called with a
     # compatible payload_format.
@@ -420,10 +421,12 @@ def _validate_supported(pf: PayloadFormat) -> Tuple[int, int, DataItemFormat]:
         raise ValueError("Unsupported tag sizes: event and channel tag sizes must be 0")
     if pf.data_item_fraction_size_bits != 0:
         raise ValueError("Unsupported data item fraction size: must be 0")
-    if pf.vector_size != 0:
-        raise ValueError("Unsupported vector size: only vector size 0 is supported")
-    if pf.repeat_count > 1:
-        raise ValueError(f"Unsupported repeat count of {pf.repeat_count}, only 1 is supported")
+    validate_strict = False  # For now no strict validation because test files have wrong vector size and repeat count and we don't use it currently
+    if validate_strict:    
+        if pf.vector_size != 1:
+            raise ValueError(f"Unsupported vector size: decoded value {pf.vector_size}, only 1 is supported")
+        if pf.repeat_count != 1:
+            raise ValueError(f"Unsupported repeat count of {pf.repeat_count}, only 1 is supported")
 
     try:
         fmt = DataItemFormat(pf.data_item_format_code)

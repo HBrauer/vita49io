@@ -141,7 +141,7 @@ class PayloadFormat:
 
         Examples:
             >>> from vita49io.protocol.cif0 import PayloadFormat
-            >>> PayloadFormat.parse(0x00000000, 0x00010001).vector_size
+            >>> PayloadFormat.parse(0x00000000, 0x00000000).vector_size
             1
         """
         w0 &= 0xFFFFFFFF
@@ -162,8 +162,8 @@ class PayloadFormat:
         item_packing_field_size_bits = ((w0 >> 6) & 0x3F) + 1  # stored as value-1
         data_item_size_bits = (w0 & 0x3F) + 1  # stored as value-1
 
-        repeat_count = ((w1 >> 16) & 0xFFFF)
-        vector_size = (w1 & 0xFFFF) 
+        repeat_count = ((w1 >> 16) & 0xFFFF) + 1  # stored as value-1
+        vector_size = (w1 & 0xFFFF) + 1  # stored as value-1
 
         return PayloadFormat(
             packing_method=packing_method,
@@ -220,8 +220,8 @@ class PayloadFormat:
         w0 |= (max(1, self.data_item_size_bits) - 1) & 0x3F
 
         w1 = 0
-        w1 |= ((max(1, self.repeat_count)) & 0xFFFF) << 16
-        w1 |= (max(1, self.vector_size) ) & 0xFFFF
+        w1 |= ((max(1, self.repeat_count) - 1) & 0xFFFF) << 16 
+        w1 |= ((max(1, self.vector_size) - 1) & 0xFFFF) 
 
         return _u32(w0), _u32(w1)
 
