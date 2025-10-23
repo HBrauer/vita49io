@@ -7,3 +7,4 @@ tests/_artifacts/
 .pytest_cache/
 src/vita49io.egg-info/
 dist/
+*.v49

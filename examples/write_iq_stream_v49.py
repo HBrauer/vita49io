@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from matplotlib import mlab, pyplot as plt
 import numpy as np
 
 from vita49io.io import IQStreamWriter
@@ -26,14 +27,14 @@ def main(argv: list[str]) -> int:
     out_path = Path(argv[1])
 
     # Stream configuration
-    fs = 1_000_000.0  # 1 MS/s
+    fs = 32_000.0  # 1 MS/s
     stream_id = 0x13572468
 
     w = IQStreamWriter(
         stream_id=stream_id,
         sample_rate_hz=fs,
-        # reference_level_dbm=-3.0,  # Uncomment to encode voltage-domain samples
-        # normalize_iq_to_reference_level=True,
+        #reference_level_dbm=-3.0,  # Uncomment to encode voltage-domain samples
+        #normalize_iq_to_reference_level=True,
         # Defaults already set to 32-bit float complex I/Q
     )
 
@@ -42,11 +43,30 @@ def main(argv: list[str]) -> int:
     data = bytearray(ctx.to_bytes())
 
     # Generate a test tone and emit in blocks
-    tone_hz = 50_000.0
-    duration_s = 0.01  # 10 ms
+    tone_hz = 1_000.0
+    duration_s = 10  # 10 ms
     N = int(fs * duration_s)
     t = np.arange(N, dtype=np.float32) / np.float32(fs)
     sig = np.exp(1j * 2 * np.pi * tone_hz * t).astype(np.complex64)
+    # Add random noise to the signal
+    noise_level = 0.05  # Adjust noise level as needed
+    noise = (np.random.randn(N) + 1j * np.random.randn(N)).astype(np.complex64) * noise_level
+    sig += noise
+
+    # Optional: Add a print statement to indicate noise was added
+    print(f"Added random noise with amplitude {noise_level}")
+    
+    # Create waterfall plot
+    plt.figure(figsize=(10, 6))
+    spec, freqs, t = mlab.specgram(sig, NFFT=256, Fs=fs, noverlap=128)
+    plt.imshow(10 * np.log10(spec), aspect='auto', origin='lower', 
+               extent=[t.min(), t.max(), freqs.min(), freqs.max()])
+    plt.colorbar(label='Power (dB)')
+    plt.ylabel('Frequency (Hz)')
+    plt.xlabel('Time (s)')
+    plt.title('Signal Waterfall Plot')
+    
+    print(f"Waterfall plot saved as 'waterfall_plot.png'")
 
     # Chunk into frames (e.g., 1024 samples per packet)
     block = 1024
@@ -59,6 +79,7 @@ def main(argv: list[str]) -> int:
 
     out_path.write_bytes(bytes(data))
     print(f"Wrote {len(data)} bytes to {out_path}")
+    plt.show()
     return 0
 
 

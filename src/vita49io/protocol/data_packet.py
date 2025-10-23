@@ -48,7 +48,8 @@ def _normalize_iq_to_reference_level(
     vpk = _reflevel_dbm_to_vpk(ref_dbm)
     if not np.isfinite(vpk) or vpk <= 0.0:
         raise ValueError("Computed peak voltage must be finite and positive")
-    scale = 1.0 / vpk
+    scale =  vpk
+    print(f"Normalizing IQ samples to reference level {ref_dbm} dBmFS (Vpk={vpk:.6f} V), scale factor {scale:.6f}")
     return np.asarray(iq) * scale
 
 
@@ -331,7 +332,7 @@ class DataPacket:
         # raw payload bytes as-is for backward compatibility.
         if self.iq is not None and payload_format is not None:
             iq_values = self.iq
-            if reference_level_dbm is not None:
+            if reference_level_dbm is not None and reference_level_dbm != 0.0:
                 iq_values = _normalize_iq_to_reference_level(
                     iq_values,
                     reference_level_dbm,
@@ -520,7 +521,8 @@ def _encode_iq_payload(iq: "np.ndarray", pf: PayloadFormat) -> bytes:
 
     ipf, di, fmt = _validate_supported(pf)
 
-    # Normalize input to (N, 2) float32 array of I and Q
+    # Converted input to (N, 2) float32 array of I and Q in order 
+    # to have a consistent starting point for all encoding paths.
     arr = np.asarray(iq)
     if arr.dtype.kind == "c":
         I = arr.real.astype(np.float32)
