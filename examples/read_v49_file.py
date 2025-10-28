@@ -20,7 +20,7 @@ def read_all_packets(path: str):
     Uses the header to determine packet size and type, parses context packets
     (including CIF0) and remembers the last context payload format to decode
     subsequent data packets (I/Q extraction when compatible).
-    Yields parsed packet objects.
+    Yields (header, packet) tuples.
     """
     from vita49io.protocol.core import Header
     from vita49io.protocol.enums import PacketType
@@ -43,7 +43,6 @@ def read_all_packets(path: str):
 
             w0 = int.from_bytes(w0_bytes, byteorder="big")
             header = Header.parse(w0)
-            print(header)
             total_words = header.packet_size
             if total_words <= 0:
                 raise ValueError(f"Invalid packet size (words) at packet {index}: {total_words}")
@@ -62,7 +61,7 @@ def read_all_packets(path: str):
                 # the last known payload format for subsequent data packets.
                 if pkt.cif0 is not None and pkt.cif0.payload_format is not None:
                     last_payload_format = pkt.cif0.payload_format
-                yield pkt
+                yield header, pkt
             elif header.packet_type in (
                 PacketType.IF_DATA_WITHOUT_STREAM_ID,
                 PacketType.IF_DATA_WITH_STREAM_ID,
@@ -70,7 +69,7 @@ def read_all_packets(path: str):
                 PacketType.EXTENSION_DATA_WITH_STREAM_ID,
             ):
                 pkt = DataPacket.from_bytes(packet_bytes, payload_format=last_payload_format)
-                yield pkt
+                yield header, pkt
             else:
                 raise ValueError(f"Unsupported packet type at index {index}: {header.packet_type}")
 
@@ -89,15 +88,26 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         default=None,
         help='Maximum number of packets to read (default: all)',
     )
+    parser.add_argument(
+        '--context-only',
+        action='store_true',
+        help='Only print context packets (others are skipped)',
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     _ensure_src_on_path()
 
+    from vita49io.protocol.context_packet import ContextPacket
+
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     count = 0
-    for pkt in read_all_packets(args.input_file):
+    for header, pkt in read_all_packets(args.input_file):
+        if args.context_only and not isinstance(pkt, ContextPacket):
+            continue
+
+        print(header)
         print(pkt)
         count += 1
         if args.max_packets is not None and count >= args.max_packets:
