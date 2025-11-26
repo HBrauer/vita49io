@@ -25,6 +25,7 @@ from typing import List, Optional, Tuple
 from enum import IntEnum
 
 from .core import _payload_bytes_to_words, _payload_words_to_bytes, _u32
+from .enums import TSI, TSF
 
 
 # ---------------------------------------------
@@ -273,6 +274,277 @@ def _from_s16_fixed7(w: int) -> float:
     return v / float(1 << 7)
 
 
+ANGLE_SCALE = 1 << 22  # Geolocation Angle Format radix (bit 22)
+ALT_SCALE = 1 << 5  # Altitude radix (bit 5)
+SPEED_SCALE = 1 << 16  # Speed over ground radix (bit 16)
+POS_SCALE = 1 << 5  # ECEF position radix (bit 5)
+VEL_SCALE = 1 << 16  # ECEF velocity radix (bit 16)
+ATT_SCALE = 1 << 22  # ECEF attitude radix (bit 22)
+
+
+def _encode_fixed_point(value: float, scale: int) -> int:
+    raw = int(round(value * scale))
+    return _u32(raw)
+
+
+def _decode_fixed_point(raw: int, scale: int) -> float:
+    v = raw & 0xFFFFFFFF
+    if v & 0x80000000:
+        v -= 0x100000000
+    return v / float(scale)
+
+
+@dataclass
+class FormattedGeolocation:
+    """Represent the formatted GPS/INS geolocation field (CIF0 bits 14 and 13)."""
+
+    tsi: TSI
+    tsf: TSF
+    manufacturer_oui: int
+    integer_seconds: int
+    fractional_seconds: int
+    latitude_deg: float
+    longitude_deg: float
+    altitude_m: float
+    speed_over_ground_m_s: float
+    heading_angle_deg: float
+    track_angle_deg: float
+    magnetic_variation_deg: float
+
+    NUM_WORDS = 11
+
+    def pack_words(self) -> List[int]:
+        # Word 0: bits [27:26]=TSI, [25:24]=TSF, [23:0]=OUI
+        w0 = (int(self.tsi) & 0x3) << 26
+        w0 |= (int(self.tsf) & 0x3) << 24
+        w0 |= self.manufacturer_oui & 0xFFFFFF
+        frac_hi = (self.fractional_seconds >> 32) & 0xFFFFFFFF
+        frac_lo = self.fractional_seconds & 0xFFFFFFFF
+        return [
+            _u32(w0),
+            _u32(self.integer_seconds),
+            _u32(frac_hi),
+            _u32(frac_lo),
+            _encode_fixed_point(self.latitude_deg, ANGLE_SCALE),
+            _encode_fixed_point(self.longitude_deg, ANGLE_SCALE),
+            _encode_fixed_point(self.altitude_m, ALT_SCALE),
+            _encode_fixed_point(self.speed_over_ground_m_s, SPEED_SCALE),
+            _encode_fixed_point(self.heading_angle_deg, ANGLE_SCALE),
+            _encode_fixed_point(self.track_angle_deg, ANGLE_SCALE),
+            _encode_fixed_point(self.magnetic_variation_deg, ANGLE_SCALE),
+        ]
+
+    @staticmethod
+    def parse(words: List[int]) -> "FormattedGeolocation":
+        if len(words) < FormattedGeolocation.NUM_WORDS:
+            raise ValueError("Truncated FormattedGeolocation field")
+        w0 = words[0]
+        tsi = TSI((w0 >> 26) & 0x3)
+        tsf = TSF((w0 >> 24) & 0x3)
+        manufacturer_oui = w0 & 0xFFFFFF
+        integer_seconds = words[1] & 0xFFFFFFFF
+        frac_hi = words[2] & 0xFFFFFFFF
+        frac_lo = words[3] & 0xFFFFFFFF
+        fractional_seconds = ((frac_hi << 32) | frac_lo) & ((1 << 64) - 1)
+        return FormattedGeolocation(
+            tsi=tsi,
+            tsf=tsf,
+            manufacturer_oui=manufacturer_oui,
+            integer_seconds=integer_seconds,
+            fractional_seconds=fractional_seconds,
+            latitude_deg=_decode_fixed_point(words[4], ANGLE_SCALE),
+            longitude_deg=_decode_fixed_point(words[5], ANGLE_SCALE),
+            altitude_m=_decode_fixed_point(words[6], ALT_SCALE),
+            speed_over_ground_m_s=_decode_fixed_point(words[7], SPEED_SCALE),
+            heading_angle_deg=_decode_fixed_point(words[8], ANGLE_SCALE),
+            track_angle_deg=_decode_fixed_point(words[9], ANGLE_SCALE),
+            magnetic_variation_deg=_decode_fixed_point(words[10], ANGLE_SCALE),
+        )
+
+
+@dataclass
+class Ephemeris:
+    """Represent either the ECEF Ephemeris or Relative Ephemeris (CIF0 bits 12/11)."""
+
+    tsi: TSI
+    tsf: TSF
+    manufacturer_oui: int
+    integer_seconds: int
+    fractional_seconds: int
+    position_x_m: float
+    position_y_m: float
+    position_z_m: float
+    attitude_alpha_deg: float
+    attitude_beta_deg: float
+    attitude_phi_deg: float
+    velocity_dx_m_s: float
+    velocity_dy_m_s: float
+    velocity_dz_m_s: float
+
+    NUM_WORDS = 13
+
+    def pack_words(self) -> List[int]:
+        # Word 0: bits [27:26]=TSI, [25:24]=TSF, [23:0]=OUI
+        w0 = (int(self.tsi) & 0x3) << 26
+        w0 |= (int(self.tsf) & 0x3) << 24
+        w0 |= self.manufacturer_oui & 0xFFFFFF
+        frac_hi = (self.fractional_seconds >> 32) & 0xFFFFFFFF
+        frac_lo = self.fractional_seconds & 0xFFFFFFFF
+        return [
+            _u32(w0),
+            _u32(self.integer_seconds),
+            _u32(frac_hi),
+            _u32(frac_lo),
+            _encode_fixed_point(self.position_x_m, POS_SCALE),
+            _encode_fixed_point(self.position_y_m, POS_SCALE),
+            _encode_fixed_point(self.position_z_m, POS_SCALE),
+            _encode_fixed_point(self.attitude_alpha_deg, ATT_SCALE),
+            _encode_fixed_point(self.attitude_beta_deg, ATT_SCALE),
+            _encode_fixed_point(self.attitude_phi_deg, ATT_SCALE),
+            _encode_fixed_point(self.velocity_dx_m_s, VEL_SCALE),
+            _encode_fixed_point(self.velocity_dy_m_s, VEL_SCALE),
+            _encode_fixed_point(self.velocity_dz_m_s, VEL_SCALE),
+        ]
+
+    @staticmethod
+    def parse(words: List[int]) -> "Ephemeris":
+        if len(words) < Ephemeris.NUM_WORDS:
+            raise ValueError("Truncated Ephemeris field")
+        w0 = words[0]
+        tsi = TSI((w0 >> 26) & 0x3)
+        tsf = TSF((w0 >> 24) & 0x3)
+        manufacturer_oui = w0 & 0xFFFFFF
+        integer_seconds = words[1] & 0xFFFFFFFF
+        frac_hi = words[2] & 0xFFFFFFFF
+        frac_lo = words[3] & 0xFFFFFFFF
+        fractional_seconds = ((frac_hi << 32) | frac_lo) & ((1 << 64) - 1)
+        return Ephemeris(
+            tsi=tsi,
+            tsf=tsf,
+            manufacturer_oui=manufacturer_oui,
+            integer_seconds=integer_seconds,
+            fractional_seconds=fractional_seconds,
+            position_x_m=_decode_fixed_point(words[4], POS_SCALE),
+            position_y_m=_decode_fixed_point(words[5], POS_SCALE),
+            position_z_m=_decode_fixed_point(words[6], POS_SCALE),
+            attitude_alpha_deg=_decode_fixed_point(words[7], ATT_SCALE),
+            attitude_beta_deg=_decode_fixed_point(words[8], ATT_SCALE),
+            attitude_phi_deg=_decode_fixed_point(words[9], ATT_SCALE),
+            velocity_dx_m_s=_decode_fixed_point(words[10], VEL_SCALE),
+            velocity_dy_m_s=_decode_fixed_point(words[11], VEL_SCALE),
+            velocity_dz_m_s=_decode_fixed_point(words[12], VEL_SCALE),
+        )
+
+
+@dataclass
+class GPSASCIIField:
+    """Represent the GPS ASCII field (CIF0 bit 9)."""
+
+    manufacturer_oui: int
+    sentences: str
+
+    def pack_words(self) -> List[int]:
+        payload_bytes = (self.sentences or "").encode("ascii", errors="strict")
+        payload = payload_bytes
+        pad_len = (4 - (len(payload) % 4)) % 4
+        payload += b"\x00" * pad_len
+        payload_words = _payload_bytes_to_words(payload)
+        num_words = len(payload_words)
+        header_0 = _u32(self.manufacturer_oui)
+        header_1 = _u32(num_words)
+        return [header_0, header_1, *payload_words]
+
+    @staticmethod
+    def parse(words: List[int]) -> Tuple["GPSASCIIField", int]:
+        if len(words) < 2:
+            raise ValueError("Truncated GPS ASCII header")
+        manufacturer_oui = words[0] & 0xFFFFFFFF
+        num_words = words[1] & 0xFFFFFFFF
+        total_needed = 2 + num_words
+        if len(words) < total_needed:
+            raise ValueError("Truncated GPS ASCII payload")
+        payload_words = words[2:total_needed]
+        payload_bytes = _payload_words_to_bytes(payload_words)
+        # Strip trailing null padding
+        payload_bytes = payload_bytes.rstrip(b"\x00")
+        sentences = payload_bytes.decode("ascii", errors="strict")
+        return GPSASCIIField(manufacturer_oui=manufacturer_oui, sentences=sentences), total_needed
+
+
+@dataclass
+class ContextAssociationLists:
+    """Represent the Context Association Lists section (CIF0 bit 8)."""
+
+    source_list: List[int]
+    system_list: List[int]
+    vector_component_list: List[int]
+    async_channel_list: List[int]
+    async_channel_tags: Optional[List[int]] = None
+
+    def pack_words(self) -> List[int]:
+        src_size = len(self.source_list)
+        sys_size = len(self.system_list)
+        vec_size = len(self.vector_component_list)
+        async_size = len(self.async_channel_list)
+        tag_list = self.async_channel_tags
+        if src_size > 511 or sys_size > 511:
+            raise ValueError("Source/System list sizes must be <= 511")
+        if vec_size > 0xFFFF:
+            raise ValueError("Vector-component list size must fit in 16 bits")
+        if async_size > 0x7FFF:
+            raise ValueError("Async-channel list size must be <= 32767")
+        if tag_list is not None and len(tag_list) != async_size:
+            raise ValueError("Async-channel tag list length must match async-channel list size")
+        word0 = ((src_size & 0x1FF) << 23) | ((sys_size & 0x1FF) << 14)
+        word1 = ((vec_size & 0xFFFF) << 16) | ((1 if tag_list else 0) << 15) | (async_size & 0x7FFF)
+        words: List[int] = [_u32(word0), _u32(word1)]
+        words.extend(_u32(x) for x in self.source_list)
+        words.extend(_u32(x) for x in self.system_list)
+        words.extend(_u32(x) for x in self.vector_component_list)
+        words.extend(_u32(x) for x in self.async_channel_list)
+        if tag_list is not None:
+            words.extend(_u32(x) for x in tag_list)
+        return words
+
+    @staticmethod
+    def parse(words: List[int]) -> Tuple["ContextAssociationLists", int]:
+        if len(words) < 2:
+            raise ValueError("Truncated Context Association Lists header")
+        word0, word1 = words[0], words[1]
+        src_size = (word0 >> 23) & 0x1FF
+        sys_size = (word0 >> 14) & 0x1FF
+        vec_size = (word1 >> 16) & 0xFFFF
+        async_has_tags = bool((word1 >> 15) & 0x1)
+        async_size = word1 & 0x7FFF
+        idx = 2
+
+        def take(n: int) -> List[int]:
+            nonlocal idx
+            end = idx + n
+            if end > len(words):
+                raise ValueError("Truncated Context Association Lists payload")
+            segment = words[idx:end]
+            idx = end
+            return segment
+
+        source_list = take(src_size)
+        system_list = take(sys_size)
+        vector_component_list = take(vec_size)
+        async_channel_list = take(async_size)
+        async_tags: Optional[List[int]] = None
+        if async_has_tags:
+            async_tags = take(async_size)
+
+        cal = ContextAssociationLists(
+            source_list=[_u32(x) for x in source_list],
+            system_list=[_u32(x) for x in system_list],
+            vector_component_list=[_u32(x) for x in vector_component_list],
+            async_channel_list=[_u32(x) for x in async_channel_list],
+            async_channel_tags=[_u32(x) for x in async_tags] if async_tags is not None else None,
+        )
+        return cal, idx
+
+
 @dataclass
 class CIF0Fields:
     """Represent the structured fields contained in CIF0 payloads.
@@ -336,13 +608,29 @@ class CIF0Fields:
     # Decoded helper (not part of on-wire format). If provided when packing
     # and raw tuple is None, it will be used to generate the two words.
     payload_format: Optional[PayloadFormat] = None
-    # Raw presence bits 14..0 preserved as-is (no additional words handled)
+
+    # Bit 14 (multi-word formatted GPS geolocation)
+    formatted_gps_geolocation: Optional["FormattedGeolocation"] = None
+    # Bit 13 (multi-word formatted INS geolocation)
+    formatted_ins_geolocation: Optional["FormattedGeolocation"] = None
+    # Bit 12 (multi-word ECEF ephemeris)
+    ecef_ephemeris: Optional["Ephemeris"] = None
+    # Bit 11 (multi-word Relative ephemeris)
+    relative_ephemeris: Optional["Ephemeris"] = None
+    # Bit 10 (single-word ephemeris reference identifier)
+    ephemeris_reference_identifier: Optional[int] = None
+    # Bit 9 (variable-length GPS ASCII field)
+    gps_ascii: Optional["GPSASCIIField"] = None
+    # Bit 8 (variable-length Context Association Lists section)
+    context_association_lists: Optional["ContextAssociationLists"] = None
+
+    # Raw presence bits 7..0 preserved as-is (no additional words handled)
     raw_low_bits: int = 0
 
     def _presence_mask(self) -> int:
         m = 0
         # Include raw low bits (14..0) as-is
-        m |= (self.raw_low_bits & 0x7FFF)
+        m |= (self.raw_low_bits & 0xFF)
         if self.context_field_change_indicator:
             m |= 1 << 31
         if self.reference_point_identifier is not None:
@@ -377,6 +665,20 @@ class CIF0Fields:
             m |= 1 << 16
         if self.data_packet_payload_format is not None:
             m |= 1 << 15
+        if self.formatted_gps_geolocation is not None:
+            m |= 1 << 14
+        if self.formatted_ins_geolocation is not None:
+            m |= 1 << 13
+        if self.ecef_ephemeris is not None:
+            m |= 1 << 12
+        if self.relative_ephemeris is not None:
+            m |= 1 << 11
+        if self.ephemeris_reference_identifier is not None:
+            m |= 1 << 10
+        if self.gps_ascii is not None:
+            m |= 1 << 9
+        if self.context_association_lists is not None:
+            m |= 1 << 8
         return m
 
     def pack(self) -> bytes:
@@ -443,6 +745,20 @@ class CIF0Fields:
             else:
                 w0, w1 = self.payload_format.pack_words()  # type: ignore[union-attr]
             words.extend([_u32(w0), _u32(w1)])
+        if self.formatted_gps_geolocation is not None:
+            words.extend(self.formatted_gps_geolocation.pack_words())
+        if self.formatted_ins_geolocation is not None:
+            words.extend(self.formatted_ins_geolocation.pack_words())
+        if self.ecef_ephemeris is not None:
+            words.extend(self.ecef_ephemeris.pack_words())
+        if self.relative_ephemeris is not None:
+            words.extend(self.relative_ephemeris.pack_words())
+        if self.ephemeris_reference_identifier is not None:
+            words.append(_u32(self.ephemeris_reference_identifier))
+        if self.gps_ascii is not None:
+            words.extend(self.gps_ascii.pack_words())
+        if self.context_association_lists is not None:
+            words.extend(self.context_association_lists.pack_words())
 
         return _payload_words_to_bytes(words)
 
@@ -466,9 +782,7 @@ class CIF0Fields:
             0
         """
 
-        # Reject unsupported lower bits explicitly requested by caller
-        # Preserve raw lower bits (14..0) without attempting to parse them
-            
+
 
         idx = 0
 
@@ -481,7 +795,7 @@ class CIF0Fields:
 
         f.context_field_change_indicator = bool(mask & (1 << 31))
         # Save raw low bits 14..0
-        f.raw_low_bits = mask & 0x7FFF
+        f.raw_low_bits = mask & 0xFF
         if mask & (1 << 30):
             need(1)
             f.reference_point_identifier = field_words[idx]
@@ -565,6 +879,42 @@ class CIF0Fields:
             except Exception:
                 f.payload_format = None
             idx += 2
+        if mask & (1 << 14):
+            need(FormattedGeolocation.NUM_WORDS)
+            segment = field_words[idx : idx + FormattedGeolocation.NUM_WORDS]
+            f.formatted_gps_geolocation = FormattedGeolocation.parse(segment)
+            idx += FormattedGeolocation.NUM_WORDS
+        if mask & (1 << 13):
+            need(FormattedGeolocation.NUM_WORDS)
+            segment = field_words[idx : idx + FormattedGeolocation.NUM_WORDS]
+            f.formatted_ins_geolocation = FormattedGeolocation.parse(segment)
+            idx += FormattedGeolocation.NUM_WORDS
+        if mask & (1 << 12):
+            need(Ephemeris.NUM_WORDS)
+            segment = field_words[idx : idx + Ephemeris.NUM_WORDS]
+            f.ecef_ephemeris = Ephemeris.parse(segment)
+            idx += Ephemeris.NUM_WORDS
+        if mask & (1 << 11):
+            need(Ephemeris.NUM_WORDS)
+            segment = field_words[idx : idx + Ephemeris.NUM_WORDS]
+            f.relative_ephemeris = Ephemeris.parse(segment)
+            idx += Ephemeris.NUM_WORDS
+        if mask & (1 << 10):
+            need(1)
+            f.ephemeris_reference_identifier = field_words[idx] & 0xFFFFFFFF
+            idx += 1
+        if mask & (1 << 9):
+            # Need two header words to learn payload length
+            need(2)
+            remaining = field_words[idx:]
+            gps_ascii, consumed = GPSASCIIField.parse(remaining)
+            f.gps_ascii = gps_ascii
+            idx += consumed
+        if mask & (1 << 8):
+            remaining = field_words[idx:]
+            cal, consumed = ContextAssociationLists.parse(remaining)
+            f.context_association_lists = cal
+            idx += consumed
         return f, idx
 
     @staticmethod
@@ -603,4 +953,10 @@ __all__ = [
     "PackingMethod",
     "SampleType",
     "DataItemFormat",
+    "FormattedGeolocation",
+    "Ephemeris",
+    "GPSASCIIField",
+    "ContextAssociationLists",
+    "_encode_fixed_point",
+    "_decode_fixed_point",
 ]

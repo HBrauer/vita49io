@@ -10,7 +10,13 @@ from .protocol.data_packet import DataPacket
 from .protocol.context_packet import ContextPacket
 from .protocol.enums import PacketType, TSI, TSF
 from .protocol.vrt_types import ClassID
-from .protocol.cif0 import CIF0Fields
+from .protocol.cif0 import (
+    CIF0Fields,
+    ContextAssociationLists,
+    Ephemeris,
+    FormattedGeolocation,
+    GPSASCIIField,
+)
 
 __all__ = [
     "DataPacket",
@@ -20,5 +26,9 @@ __all__ = [
     "TSF",
     "ClassID",
     "CIF0Fields",
+    "FormattedGeolocation",
+    "Ephemeris",
+    "GPSASCIIField",
+    "ContextAssociationLists",
 ]
 
