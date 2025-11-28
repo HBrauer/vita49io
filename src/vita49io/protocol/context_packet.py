@@ -207,14 +207,14 @@ class ContextPacket(LazyBinary):
         payload = self._mv[payload_start:payload_end]
         if len(payload) < 4:
             raise ValueError("Context packet missing CIF0 mask word")
-        cif0_mask = WORD.unpack_from(payload, 0)[0] & 0xFFFFFFFF
+        cif0_mask = WORD.unpack_from(payload, 0)[0]
         pos = 4
         extra_masks: List[Tuple[int, int]] = []
         for i in range(1, 7):
             if (cif0_mask >> i) & 1:
                 if pos + 4 > len(payload):
                     break
-                extra_masks.append((i, WORD.unpack_from(payload, pos)[0] & 0xFFFFFFFF))
+                extra_masks.append((i, WORD.unpack_from(payload, pos)[0]))
                 pos += 4
         remaining = payload[pos:]
         remaining_words = [w[0] for w in struct.iter_unpack(">I", remaining)]
@@ -313,7 +313,7 @@ class ContextPacket(LazyBinary):
         if self.cif0 is None:
             raise TypeError("cif0 is required for ContextPacket")
         cif0_words: List[int] = _payload_bytes_to_words(self.cif0.pack())
-        cif0_mask = cif0_words[0] & 0xFFFFFFFF
+        cif0_mask = cif0_words[0]
         if self.cif_extra_masks:
             for i, _m in self.cif_extra_masks:
                 cif0_mask |= 1 << i

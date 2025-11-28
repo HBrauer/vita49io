@@ -158,9 +158,6 @@ class PayloadFormat:
             >>> PayloadFormat.parse(0x00000000, 0x00000000).vector_size
             1
         """
-        w0 &= 0xFFFFFFFF
-        w1 &= 0xFFFFFFFF
-
         packing_method = PackingMethod((w0 >> 31) & 0x1)
         sample_type = SampleType((w0 >> 29) & 0x3)
         data_item_format_code = (w0 >> 24) & 0x1F
@@ -296,9 +293,9 @@ class FormattedGeolocation:
         tsi = TSI((w0 >> 26) & 0x3)
         tsf = TSF((w0 >> 24) & 0x3)
         manufacturer_oui = w0 & 0xFFFFFF
-        integer_seconds = words[1] & 0xFFFFFFFF
-        frac_hi = words[2] & 0xFFFFFFFF
-        frac_lo = words[3] & 0xFFFFFFFF
+        integer_seconds = words[1]
+        frac_hi = words[2]
+        frac_lo = words[3]
         fractional_seconds = ((frac_hi << 32) | frac_lo) & ((1 << 64) - 1)
         return FormattedGeolocation(
             tsi=tsi,
@@ -368,9 +365,9 @@ class Ephemeris:
         tsi = TSI((w0 >> 26) & 0x3)
         tsf = TSF((w0 >> 24) & 0x3)
         manufacturer_oui = w0 & 0xFFFFFF
-        integer_seconds = words[1] & 0xFFFFFFFF
-        frac_hi = words[2] & 0xFFFFFFFF
-        frac_lo = words[3] & 0xFFFFFFFF
+        integer_seconds = words[1]
+        frac_hi = words[2]
+        frac_lo = words[3]
         fractional_seconds = ((frac_hi << 32) | frac_lo) & ((1 << 64) - 1)
         return Ephemeris(
             tsi=tsi,
@@ -412,8 +409,8 @@ class GPSASCIIField:
     def parse(words: List[int]) -> Tuple["GPSASCIIField", int]:
         if len(words) < 2:
             raise ValueError("Truncated GPS ASCII header")
-        manufacturer_oui = words[0] & 0xFFFFFFFF
-        num_words = words[1] & 0xFFFFFFFF
+        manufacturer_oui = words[0]
+        num_words = words[1]
         total_needed = 2 + num_words
         if len(words) < total_needed:
             raise ValueError("Truncated GPS ASCII payload")
@@ -638,7 +635,7 @@ class CIF0Fields:
     def pack(self) -> bytes:
         """Serialize the CIF0 fields into bytes beginning with the mask word."""
         words: List[int] = []
-        words.append(self._presence_mask() & 0xFFFFFFFF)
+        words.append(self._presence_mask())
 
         if self.reference_point_identifier is not None:
             words.append(_u32(self.reference_point_identifier))
@@ -676,7 +673,7 @@ class CIF0Fields:
         if self.timestamp_calibration_time_s is not None:
             words.append(_u32(self.timestamp_calibration_time_s))
         if self.temperature_c is not None:
-            words.append(_u32(self.temperature_c & 0xFFFFFFFF))
+            words.append(_u32(self.temperature_c))
         if self.device_identifier is not None:
             oui, dev = self.device_identifier
             words.extend([_u32(oui & 0xFFFFFF), _u32(dev)])
@@ -785,7 +782,7 @@ class CIF0Fields:
             idx += 1
         if mask & (1 << 22):
             need(1)
-            f.over_range_count = field_list[idx] & 0xFFFFFFFF
+            f.over_range_count = field_list[idx]
             idx += 1
         if mask & (1 << 21):
             need(2)
@@ -794,14 +791,14 @@ class CIF0Fields:
         if mask & (1 << 20):
             need(2)
             hi, lo = field_list[idx], field_list[idx + 1]
-            i = ((hi & 0xFFFFFFFF) << 32) | (lo & 0xFFFFFFFF)
+            i = (hi << 32) | lo
             if i & (1 << 63):
                 i -= 1 << 64
             f.timestamp_adjustment_fs = i
             idx += 2
         if mask & (1 << 19):
             need(1)
-            f.timestamp_calibration_time_s = field_list[idx] & 0xFFFFFFFF
+            f.timestamp_calibration_time_s = field_list[idx]
             idx += 1
         if mask & (1 << 18):
             need(1)
@@ -813,17 +810,17 @@ class CIF0Fields:
         if mask & (1 << 17):
             need(2)
             oui = field_list[idx] & 0xFFFFFF
-            dev = field_list[idx + 1] & 0xFFFFFFFF
+            dev = field_list[idx + 1]
             f.device_identifier = (oui, dev)
             idx += 2
         if mask & (1 << 16):
             need(1)
-            f.state_event_indicators = field_list[idx] & 0xFFFFFFFF
+            f.state_event_indicators = field_list[idx]
             idx += 1
         if mask & (1 << 15):
             need(2)
-            w0 = field_list[idx] & 0xFFFFFFFF
-            w1 = field_list[idx + 1] & 0xFFFFFFFF
+            w0 = field_list[idx]
+            w1 = field_list[idx + 1]
             f.data_packet_payload_format = (w0, w1)
             # Also provide a decoded, user-friendly view
             try:
@@ -853,7 +850,7 @@ class CIF0Fields:
             idx += Ephemeris.NUM_WORDS
         if mask & (1 << 10):
             need(1)
-            f.ephemeris_reference_identifier = field_list[idx] & 0xFFFFFFFF
+            f.ephemeris_reference_identifier = field_list[idx]
             idx += 1
         if mask & (1 << 9):
             # Need two header words to learn payload length

@@ -252,7 +252,7 @@ class DataPacket(LazyBinary):
             _, _, end = self._common_info()
             if end < 4:
                 raise ValueError("Truncated packet: trailer indicated but no words present")
-            self._trailer = WORD.unpack_from(self._mv, end - 4)[0] & 0xFFFFFFFF
+            self._trailer = WORD.unpack_from(self._mv, end - 4)[0]
         return self._trailer
 
     @trailer.setter
