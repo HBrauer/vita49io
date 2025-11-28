@@ -85,6 +85,13 @@ class TestVitaExampleFilesRoundtrip(unittest.TestCase):
                 # Repack all packets into memory buffer
                 out = io.BytesIO()
                 for pkt in _iter_packets(path):
+                    # Force a logical rebuild: decode fields then re-encode, not
+                    # just forwarding the original memoryview-backed bytes.
+                    if isinstance(pkt, DataPacket):
+                        payload = pkt.payload
+                        pkt.payload = payload.tobytes() if isinstance(payload, memoryview) else payload
+                    elif isinstance(pkt, ContextPacket) and pkt.cif0 is not None:
+                        pkt.cif0 = pkt.cif0
                     out.write(pkt.to_bytes())
                 repacked = out.getvalue()
 
