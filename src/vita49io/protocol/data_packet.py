@@ -1,10 +1,10 @@
 """Implement VITA 49 data packet helpers for encoding and decoding IQ payloads.
 
-Examples:
-    >>> from vita49io.protocol.data_packet import DataPacket
-    >>> from vita49io.protocol.enums import PacketType
-    >>> DataPacket(packet_type=PacketType.IF_DATA_WITH_STREAM_ID, stream_id=1).payload
-    b''
+Packets follow a lazy, memoryview-backed design:
+
+* ``from_bytes`` keeps a ``memoryview`` of the raw packet and defers decoding.
+* ``to_bytes`` fast-paths to the stored bytes when the packet was not mutated.
+* IQ/payload are decoded only when accessed.
 """
 
 from __future__ import annotations
@@ -14,13 +14,14 @@ from typing import Optional, Tuple, List, Union
 import numpy as np
 
 from .core import (
+    LazyBinary,
     Header,
+    WORD,
     _Common,
     _finalize_words_to_bytes,
     _pack_common_prefix,
     _parse_common_from_bytes,
     _payload_bytes_to_words,
-    _payload_words_to_bytes,
     _u32,
 )
 from .enums import PacketType, TSI, TSF
@@ -51,169 +52,242 @@ def _normalize_iq_to_reference_level(
     return np.asarray(iq) * scale
 
 
-@dataclass(init=False)
-class DataPacket:
-    """Represent a VITA 49 data packet. These packets carry the raw, high-rate signal samples (I and Q data). The payload of a Data Packet is a contiguous stream of binary values representing the digitized RF signal over time.
+@dataclass(init=False, slots=True)
+class DataPacket(LazyBinary):
+    """Represent a VITA 49 data packet with lazy payload/IQ decoding."""
 
-    Args:
-        header (Header): Pre-built header to attach to the packet.
-        stream_id (Optional[int]): Stream identifier value if the packet type carries one.
-        class_id (Optional[ClassID]): VITA 49 class identifier tuple when present.
-        integer_seconds (Optional[int]): Integer seconds component for timestamped packets.
-        fractional_seconds (Optional[int]): Fractional seconds component for timestamped packets.
-        payload (bytes): Raw payload buffer containing opaque data words.
-        trailer (Optional[int]): Optional 32-bit trailer word when indicator bit 26 is set.
-        iq (Optional[np.ndarray]): Decoded IQ samples when constructed from structured data.
-
-    Examples:
-        >>> from vita49io.protocol.data_packet import DataPacket
-        >>> from vita49io.protocol.enums import PacketType
-        >>> payload = np.array([1.0, 0.0, 0.0, 1.0], dtype=">f4").tobytes()
-        >>> pkt = DataPacket(
-            packet_type=PacketType.IF_DATA_WITH_STREAM_ID,
-            stream_id=1,
-            tsi=TSI.UTC,
-            tsf=TSF.FRACTIONAL,
-            integer_seconds=1_700_000_000,
-            fractional_seconds=0,
-            payload=payload,  # raw payload goes here
-
-    """
-    header: Header
-    stream_id: Optional[int] = None
-    class_id: Optional[ClassID] = None
-    integer_seconds: Optional[int] = None
-    fractional_seconds: Optional[int] = None
-    payload: Union[bytes, memoryview] = b""
-    trailer: Optional[int] = None
+    _header: Header | None = None
+    _stream_id: Optional[int] = None
+    _class_id: Optional[ClassID] = None
+    _integer_seconds: Optional[int] = None
+    _fractional_seconds: Optional[int] = None
+    _payload: Union[bytes, memoryview, None] = None
+    _trailer: Optional[int] = None
+    _iq: Optional["np.ndarray"] = None
+    _payload_format: Optional[PayloadFormat] = None
+    _copy_payload: bool = False
     validate_strict: bool = False
-    # Optional decoded IQ samples (complex64) when a compatible PayloadFormat
-    # is provided to from_bytes(). Not serialized unless to_bytes() is called with a
-    # compatible payload_format.
-    iq: Optional["np.ndarray"] = None
 
     def __init__(
         self,
         *,
-        # Either provide a ready Header or supply header fields below
         header: Optional[Header] = None,
         packet_type: Optional[PacketType] = None,
         tsi: TSI = TSI.NONE,
         tsf: TSF = TSF.NONE,
         packet_count: int = 0,
-        # Common fields
         stream_id: Optional[int] = None,
         class_id: Optional[ClassID] = None,
         integer_seconds: Optional[int] = None,
         fractional_seconds: Optional[int] = None,
-        payload: Union[bytes, memoryview] = b"",
+        payload: Union[bytes, memoryview, None] = None,
         trailer: Optional[int] = None,
-        # Optional decoded IQ
         iq: Optional["np.ndarray"] = None,
-        # If true, set header.indicators_25 (V49.2-only packet)
+        payload_format: Optional[PayloadFormat] = None,
+        validate_strict: bool = False,
         requiresVita49_2: bool = False,
+        _mv: memoryview | None = None,
+        copy_payload: bool = False,
     ) -> None:
-        if header is None:
-            if packet_type is None:
-                raise TypeError("Either header or packet_type must be provided")
-            # packet_size is computed during to_bytes()
+        # Call base __init__ directly to avoid dataclass/super slot quirks
+        LazyBinary.__init__(self, _mv=_mv)
+        if header is None and packet_type is not None:
             header = Header(
                 packet_type=packet_type,
                 class_id_present=(class_id is not None),
-                indicators_26=(trailer is not None),  
+                indicators_26=(trailer is not None),
                 indicators_25=bool(requiresVita49_2),
+                indicators_24=False,
                 tsi=tsi,
                 tsf=tsf,
                 packet_count=int(packet_count),
                 packet_size=0,
             )
-        self.header = header
-        self.stream_id = stream_id
-        self.class_id = class_id
-        self.integer_seconds = integer_seconds
-        self.fractional_seconds = fractional_seconds
-        self.payload = payload
-        self.trailer = trailer
-        self.iq = iq
+        if header is None and _mv is None:
+            raise TypeError("Either header or packet_type must be provided")
+        self._header = header
+        self._stream_id = stream_id
+        self._class_id = class_id
+        self._integer_seconds = integer_seconds
+        self._fractional_seconds = fractional_seconds
+        self._payload = payload if _mv is None else payload
+        self._trailer = trailer
+        self._iq = iq
+        self._payload_format = payload_format
+        self._copy_payload = copy_payload
+        self.validate_strict = validate_strict
+        if _mv is None:
+            if self._payload is None:
+                self._payload = b""
+            self._mark_dirty()
 
-    # Thin convenience accessors expected by tests/users
+    # ---------- common prefix ----------
+    def _common_info(self) -> Tuple[_Common, int, int]:
+        def decode(self, mv: memoryview) -> Tuple[_Common, int, int]:
+            common, payload_start, payload_end = _parse_common_from_bytes(mv)
+            if common.header.packet_type not in (
+                PacketType.IF_DATA_WITHOUT_STREAM_ID,
+                PacketType.IF_DATA_WITH_STREAM_ID,
+                PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
+                PacketType.EXTENSION_DATA_WITH_STREAM_ID,
+            ):
+                raise ValueError("Not a Data packet type")
+            if self._header is None:
+                self._header = common.header
+            if self._stream_id is None:
+                self._stream_id = common.stream_id
+            if self._class_id is None:
+                self._class_id = common.class_id
+            if self._integer_seconds is None:
+                self._integer_seconds = common.integer_seconds
+            if self._fractional_seconds is None:
+                self._fractional_seconds = common.fractional_seconds
+            return common, payload_start, payload_end
+
+        return self._lazy_field("common_info", decode)
+
+    def _payload_bounds(self) -> Tuple[int, int]:
+        _, start, end = self._common_info()
+        if self.header.indicators_26:
+            end -= 4
+        return start, end
+
+    # ---------- convenience accessors ----------
+    @property
+    def header(self) -> Header:
+        if self._header is None:
+            common, _, _ = self._common_info()
+            self._header = common.header
+        return self._header
+
+    @header.setter
+    def header(self, value: Header) -> None:
+        self._header = value
+        self._mark_dirty()
+
+    @property
+    def stream_id(self) -> Optional[int]:
+        if self._stream_id is None:
+            common, _, _ = self._common_info()
+            self._stream_id = common.stream_id
+        return self._stream_id
+
+    @stream_id.setter
+    def stream_id(self, value: Optional[int]) -> None:
+        self._stream_id = value
+        self._mark_dirty()
+
+    @property
+    def class_id(self) -> Optional[ClassID]:
+        if self._class_id is None:
+            common, _, _ = self._common_info()
+            self._class_id = common.class_id
+        return self._class_id
+
+    @class_id.setter
+    def class_id(self, value: Optional[ClassID]) -> None:
+        self._class_id = value
+        self._mark_dirty()
+
+    @property
+    def integer_seconds(self) -> Optional[int]:
+        if self._integer_seconds is None:
+            common, _, _ = self._common_info()
+            self._integer_seconds = common.integer_seconds
+        return self._integer_seconds
+
+    @integer_seconds.setter
+    def integer_seconds(self, value: Optional[int]) -> None:
+        self._integer_seconds = value
+        self._mark_dirty()
+
+    @property
+    def fractional_seconds(self) -> Optional[int]:
+        if self._fractional_seconds is None:
+            common, _, _ = self._common_info()
+            self._fractional_seconds = common.fractional_seconds
+        return self._fractional_seconds
+
+    @fractional_seconds.setter
+    def fractional_seconds(self, value: Optional[int]) -> None:
+        self._fractional_seconds = value
+        self._mark_dirty()
+
     @property
     def packet_type(self) -> PacketType:
-        """Return the packet type reported by the packet header.
-
-        Returns:
-            PacketType: The enumerated packet type associated with the packet.
-
-        Examples:
-            >>> from vita49io.protocol.data_packet import DataPacket
-            >>> from vita49io.protocol.enums import PacketType
-            >>> DataPacket(packet_type=PacketType.IF_DATA_WITH_STREAM_ID, stream_id=1).packet_type
-            <PacketType.IF_DATA_WITH_STREAM_ID: 1>
-        """
         return self.header.packet_type
 
     @property
     def tsi(self) -> TSI:
-        """Return the Timestamp Integer (TSI) mode encoded in the header.
-
-        Returns:
-            TSI: The enumerated integer timestamp mode.
-
-        Examples:
-            >>> from vita49io.protocol.data_packet import DataPacket
-            >>> from vita49io.protocol.enums import PacketType, TSI
-            >>> DataPacket(packet_type=PacketType.IF_DATA_WITH_STREAM_ID, stream_id=1, tsi=TSI.UTC).tsi
-            <TSI.UTC: 1>
-        """
         return self.header.tsi
 
     @property
     def tsf(self) -> TSF:
-        """Return the Timestamp Fractional (TSF) mode encoded in the header.
-
-        Returns:
-            TSF: The enumerated fractional timestamp selection.
-
-        Examples:
-            >>> from vita49io.protocol.data_packet import DataPacket
-            >>> from vita49io.protocol.enums import PacketType, TSF
-            >>> DataPacket(packet_type=PacketType.IF_DATA_WITH_STREAM_ID, stream_id=1, tsf=TSF.FRACTIONAL).tsf
-            <TSF.FRACTIONAL: 2>
-        """
         return self.header.tsf
 
     @property
     def packet_count(self) -> int:
-        """Return the rolling packet count encoded in the header.
-
-        Returns:
-            int: The lower 4-bit packet count value extracted from the header.
-
-        Examples:
-            >>> from vita49io.protocol.data_packet import DataPacket
-            >>> from vita49io.protocol.enums import PacketType
-            >>> DataPacket(packet_type=PacketType.IF_DATA_WITH_STREAM_ID, stream_id=1, packet_count=3).packet_count
-            3
-        """
         return self.header.packet_count
 
+    @property
+    def payload(self) -> Union[bytes, memoryview]:
+        if self._payload is None:
+            if self._mv is None:
+                return b""
+            start, end = self._payload_bounds()
+            view = self._mv[start:end]
+            self._payload = view.tobytes() if self._copy_payload else view
+        return self._payload
+
+    @payload.setter
+    def payload(self, value: Union[bytes, memoryview]) -> None:
+        self._payload = value
+        self._mark_dirty()
+
+    @property
+    def trailer(self) -> Optional[int]:
+        if self._trailer is None and self.header.indicators_26 and self._mv is not None:
+            _, _, end = self._common_info()
+            if end < 4:
+                raise ValueError("Truncated packet: trailer indicated but no words present")
+            self._trailer = WORD.unpack_from(self._mv, end - 4)[0] & 0xFFFFFFFF
+        return self._trailer
+
+    @trailer.setter
+    def trailer(self, value: Optional[int]) -> None:
+        self._trailer = value
+        self._mark_dirty()
+
+    @property
+    def payload_format(self) -> Optional[PayloadFormat]:
+        return self._payload_format
+
+    @payload_format.setter
+    def payload_format(self, value: Optional[PayloadFormat]) -> None:
+        self._payload_format = value
+        self._mark_dirty()
+
+    @property
+    def iq(self) -> Optional["np.ndarray"]:
+        if self._iq is not None:
+            return self._iq
+        if self._payload_format is None:
+            return None
+        pay = self.payload
+        pay_bytes = pay.tobytes() if isinstance(pay, memoryview) else pay
+        self._iq = _decode_iq_payload(pay_bytes, self._payload_format)
+        return self._iq
+
+    @iq.setter
+    def iq(self, value: Optional["np.ndarray"]) -> None:
+        self._iq = value
+        self._mark_dirty()
+
     def __repr__(self) -> str:  # pragma: no cover - human-facing formatting
-        """Return a comprehensive string summary of the packet.
-
-        Returns:
-            str: Human-readable fields for debugging sequences and payloads.
-
-        Examples:
-            >>> from vita49io.protocol.data_packet import DataPacket
-            >>> repr(DataPacket(packet_type=PacketType.IF_DATA_WITH_STREAM_ID, stream_id=1))
-            'DataPacket(packet_type=IF_DATA_WITH_STREAM_ID, stream_id=0x00000001, payload_len=0, packet_count=0, requiresVita49_2=False)'
-        """
         def _hex32(v: int) -> str:
             return f"0x{v & 0xFFFFFFFF:08X}"
 
-        parts: List[str] = []
-        # Summarize header inline
-        parts.append(f"packet_type={self.header.packet_type.name}")
+        parts: List[str] = [f"packet_type={self.header.packet_type.name}"]
         if self.stream_id is not None:
             parts.append(f"stream_id={_hex32(self.stream_id)}")
         if self.class_id is not None:
@@ -229,28 +303,18 @@ class DataPacket:
             parts.append(f"integer_seconds={self.integer_seconds}")
         if self.fractional_seconds is not None:
             parts.append(f"fractional_seconds={int(self.fractional_seconds)}")
-        # Keep payload concise; show length only
         parts.append(f"payload_len={len(self.payload)}")
         if self.trailer is not None:
             parts.append(f"trailer={_hex32(self.trailer)}")
-        # Show packet count always for debugging sequences
         parts.append(f"packet_count={self.header.packet_count}")
         parts.append(f"requiresVita49_2={self.header.indicators_25}")
-        if self.header.indicators_24: # Indicator bits (for debugging)
+        if self.header.indicators_24:
             parts.append("indicators_24=True")
-        # If IQ present, summarize size without importing numpy
-        if self.iq is not None:
-            n = 0
+        if self._iq is not None:
             try:
-                n = int(getattr(self.iq, "size", 0))
+                parts.append(f"iq_len={int(getattr(self._iq, 'size', len(self._iq)))}")
             except Exception:
-                pass
-            if n == 0:
-                try:
-                    n = len(self.iq)
-                except Exception:
-                    n = 0
-            parts.append(f"iq_len={n}")
+                parts.append("iq_len=?")
         return f"DataPacket({', '.join(parts)})"
 
     def to_bytes(
@@ -259,65 +323,44 @@ class DataPacket:
         *,
         reference_level_dbm: Optional[float] = None,
     ) -> bytes:
-        """Serialize the packet into raw VITA 49 bytes.
+        if not self._dirty and self._mv is not None:
+            return self._mv.tobytes()
 
-        Args:
-            payload_format (Optional[PayloadFormat]): Optional payload format metadata used to decode IQ arrays when present.
-            reference_level_dbm (Optional[float]): When provided together with IQ samples,
-                normalize the samples using the given reference level (dBmFS)
-                before quantization. Requires `payload_format`.
-
-        Returns:
-            bytes: The serialized packet bytes including header, payload, and optional trailer.
-
-        Raises:
-            ValueError: If the packet type is not one of the supported data packet variants or required fields are missing.
-
-        Examples:
-            >>> from vita49io.protocol.data_packet import DataPacket
-            >>> from vita49io.protocol.enums import PacketType
-            >>> pkt = DataPacket(packet_type=PacketType.IF_DATA_WITH_STREAM_ID, stream_id=1, payload=b"\x00\x00\x00\x00")
-            >>> isinstance(pkt.to_bytes(), bytes)
-            True
-        """
-        if self.header.packet_type not in (
+        hdr = self.header
+        if hdr.packet_type not in (
             PacketType.IF_DATA_WITHOUT_STREAM_ID,
             PacketType.IF_DATA_WITH_STREAM_ID,
             PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
             PacketType.EXTENSION_DATA_WITH_STREAM_ID,
         ):
-            raise ValueError(
-                "DataPacket must be IF/EXT data (with/without Stream ID)"
-            )
+            raise ValueError("DataPacket must be IF/EXT data (with/without Stream ID)")
 
-        # Enforce consistency between packet type and Stream ID presence
-        if self.header.packet_type in (
+        if hdr.packet_type in (
             PacketType.IF_DATA_WITH_STREAM_ID,
             PacketType.EXTENSION_DATA_WITH_STREAM_ID,
         ) and self.stream_id is None:
             raise ValueError("Packet type requires a Stream ID, but none provided")
-        if self.header.packet_type in (
+        if hdr.packet_type in (
             PacketType.IF_DATA_WITHOUT_STREAM_ID,
             PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
         ) and self.stream_id is not None:
             raise ValueError("Packet type forbids a Stream ID, but one was provided")
-        if self.header.class_id_present and self.class_id is None:
+        if hdr.class_id_present and self.class_id is None:
             raise ValueError("Packet type requires a Class ID, but none provided")
-        if self.header.indicators_26 and self.trailer is None:
+        if hdr.indicators_26 and self.trailer is None:
             raise ValueError("Packet type requires a trailer, but none provided")
 
+        pf = payload_format or self._payload_format
         if reference_level_dbm is not None:
-            if payload_format is None:
-                raise ValueError(
-                    "reference_level_dbm requires payload_format when encoding IQ data"
-                )
+            if pf is None:
+                raise ValueError("reference_level_dbm requires payload_format when encoding IQ data")
             if self.iq is None:
                 raise ValueError(
                     "reference_level_dbm provided but packet was constructed without IQ samples"
                 )
 
         common = _Common(
-            header=self.header,
+            header=hdr,
             stream_id=self.stream_id,
             class_id=self.class_id,
             integer_seconds=self.integer_seconds,
@@ -325,95 +368,42 @@ class DataPacket:
         )
         words: List[int] = _pack_common_prefix(common)
 
-        # If IQ samples are provided and a payload_format is given, encode IQ
-        # into payload bytes according to the supported subset. Otherwise use
-        # raw payload bytes as-is for backward compatibility.
-        if self.iq is not None and payload_format is not None:
+        if self.iq is not None and pf is not None:
             iq_values = self.iq
             if reference_level_dbm is not None and reference_level_dbm != 0.0:
-                iq_values = _normalize_iq_to_reference_level(
-                    iq_values,
-                    reference_level_dbm,
-                )
-            payload_bytes = _encode_iq_payload(iq_values, payload_format)
+                iq_values = _normalize_iq_to_reference_level(iq_values, reference_level_dbm)
+            payload_bytes: Union[bytes, memoryview] = _encode_iq_payload(iq_values, pf)
         else:
             payload_bytes = self.payload
 
         words.extend(_payload_bytes_to_words(payload_bytes))
         if self.trailer is not None:
             words.append(_u32(self.trailer))
-        return _finalize_words_to_bytes(words)
 
-    @staticmethod
+        raw_bytes = _finalize_words_to_bytes(words)
+        self._mv = memoryview(raw_bytes)
+        self._dirty = False
+        return raw_bytes
+
+    @classmethod
     def from_bytes(
+        cls,
         data: Union[bytes, bytearray, memoryview],
         payload_format: Optional[PayloadFormat] = None,
         *,
         decode_iq: bool = True,
-        copy_payload: bool = True,
+        copy_payload: bool = False,
     ) -> "DataPacket":
-        """Construct a DataPacket from serialized VITA 49 bytes.
-
-        Args:
-            data (bytes): Raw packet bytes starting with the VITA 49 header word.
-            payload_format (Optional[PayloadFormat]): Optional payload metadata used to decode IQ samples.
-            decode_iq (bool): When False, skip IQ decoding even if a payload_format is provided
-                (useful for fast metadata-only parsing and raw payload access).
-            copy_payload (bool): When False, keep a memoryview of the payload instead of copying
-                to bytes (useful for zero-copy slicing or defering conversions).
-
-        Returns:
-            DataPacket: The decoded packet with header, payload, and optional IQ samples.
-
-        Raises:
-            ValueError: If the bytes are not a valid VITA 49 data packet or required fields are missing.
-
-        Examples:
-            >>> from vita49io.protocol.data_packet import DataPacket
-            >>> from vita49io.protocol.enums import PacketType
-            >>> pkt = DataPacket(packet_type=PacketType.IF_DATA_WITH_STREAM_ID, stream_id=1, payload=b"\x00\x00\x00\x00")
-            >>> DataPacket.from_bytes(pkt.to_bytes()).stream_id
-            1
         """
-        mv = memoryview(data)
-        total_len = len(mv)
-        if total_len < 4 or total_len % 4 != 0:
-            raise ValueError("Invalid VRT packet length")
+        Construct a DataPacket backed by a memoryview of the raw bytes.
 
-        common, payload_start, payload_end = _parse_common_from_bytes(mv)
-        header = common.header
-        if header.packet_type not in (
-            PacketType.IF_DATA_WITHOUT_STREAM_ID,
-            PacketType.IF_DATA_WITH_STREAM_ID,
-            PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
-            PacketType.EXTENSION_DATA_WITH_STREAM_ID,
-        ):
-            raise ValueError("Not a Data packet type")
+        IQ decoding is deferred; `decode_iq` is accepted for compatibility but
+        `.iq` is decoded lazily when accessed and a payload_format is available.
+        """
+        mv = data if isinstance(data, memoryview) else memoryview(data)
+        pkt = cls(_mv=mv, payload_format=payload_format, copy_payload=copy_payload)
+        return pkt
 
-        trailer: Optional[int] = None
-        if header.indicators_26:
-            if payload_end - payload_start < 4:
-                raise ValueError("Truncated packet: trailer indicated but no words present")
-            trailer = int.from_bytes(mv[payload_end - 4 : payload_end], byteorder="big")
-            payload_end -= 4
-
-        payload_mv = mv[payload_start:payload_end]
-        payload_bytes: Union[bytes, memoryview] = payload_mv.tobytes() if copy_payload else payload_mv
-
-        iq = None
-        if decode_iq and payload_format is not None:
-            iq = _decode_iq_payload(payload_bytes, payload_format)
-
-        return DataPacket(
-            header=header,
-            stream_id=common.stream_id,
-            class_id=common.class_id,
-            integer_seconds=common.integer_seconds,
-            fractional_seconds=common.fractional_seconds,
-            payload=payload_bytes,
-            trailer=trailer,
-            iq=iq,
-        )
 
 __all__ = ["DataPacket"]
 

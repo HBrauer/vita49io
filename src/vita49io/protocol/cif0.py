@@ -733,7 +733,7 @@ class CIF0Fields:
             field_list = field_words
         else:
             mv = memoryview(field_words)
-            field_list = [w[0] for w in struct.iter_unpack(">I", mv.tobytes())]
+            field_list = [w[0] for w in struct.iter_unpack(">I", mv)]
 
         idx = 0
 
@@ -892,7 +892,7 @@ class CIF0Fields:
         mv = memoryview(payload)
         if len(mv) < 4:
             raise ValueError("Empty payload for CIF0")
-        words = [w[0] for w in struct.iter_unpack(">I", mv.tobytes())]
+        words = [w[0] for w in struct.iter_unpack(">I", mv)]
         mask = words[0]
         f, used_field_words = CIF0Fields.parse_from_mask(mask, words[1:])
         return f, (1 + used_field_words) * 4

@@ -9,9 +9,9 @@ Examples:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import struct
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from .enums import PacketType, TSI, TSF
 from .utils import (
@@ -33,6 +33,56 @@ _HDR_TSI_MASK = 0x00C00000  # 2 bits
 _HDR_TSF_MASK = 0x00300000  # 2 bits
 _HDR_PKT_CNT_MASK = 0x000F0000  # 4 bits
 _HDR_PKT_SIZE_MASK = 0x0000FFFF  # 16 bits (32-bit words)
+
+# Reusable struct for fast 32-bit big-endian word unpacking
+WORD = struct.Struct(">I")
+
+
+@dataclass(slots=True)
+class LazyBinary:
+    """
+    Base class for lazy, memoryview-backed binary objects.
+
+    Subclasses keep the original bytes in `_mv` and only decode fields
+    when accessed via `_lazy_field`. When any logical field is mutated,
+    `_mark_dirty()` should be called so `to_bytes()` knows to rebuild.
+    """
+
+    _mv: memoryview | None = field(default=None, repr=False)
+    _cache: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
+    _dirty: bool = field(default=False, init=False, repr=False)
+
+    @classmethod
+    def from_bytes(cls, data: bytes | bytearray | memoryview) -> "LazyBinary":
+        mv = data if isinstance(data, memoryview) else memoryview(data)
+        # type: ignore[call-arg]
+        return cls(_mv=mv)
+
+    def to_bytes(self) -> bytes:
+        """
+        Default encoding: if backed by a memoryview and unchanged, copy bytes.
+        Subclasses override to rebuild when `_dirty` is True.
+        """
+        if self._mv is None:
+            raise ValueError("No backing memoryview; subclass must implement to_bytes().")
+        return self._mv.tobytes()
+
+    def _lazy_field(self, name: str, decoder) -> Any:
+        """
+        Decode and cache a field on first access.
+        decoder(self, mv) -> value
+        """
+        if name in self._cache:
+            return self._cache[name]
+        if self._mv is None:
+            raise ValueError("Object not backed by bytes.")
+        value = decoder(self, self._mv)
+        self._cache[name] = value
+        return value
+
+    def _mark_dirty(self) -> None:
+        self._dirty = True
+        self._cache.clear()
 
 
 @dataclass
@@ -66,6 +116,15 @@ class Header:
     tsf: TSF = TSF.NONE
     packet_count: int = 0  # 4 bits
     packet_size: int = 0  # total words
+
+    @classmethod
+    def from_bytes(cls, data: bytes | bytearray | memoryview) -> "Header":
+        """Parse a header directly from bytes without copying."""
+        mv = data if isinstance(data, memoryview) else memoryview(data)
+        if len(mv) < 4:
+            raise ValueError("Header requires at least 4 bytes")
+        w0 = WORD.unpack_from(mv, 0)[0]
+        return cls.parse(w0)
 
     def pack(self) -> int:
         """Serialize the header fields into a 32-bit word.
@@ -381,6 +440,8 @@ __all__ = [
     "_unpack_u32_be",
     "_payload_bytes_to_words",
     "_payload_words_to_bytes",
+    "WORD",
+    "LazyBinary",
     "Header",
     "_Common",
     "_pack_common_prefix",

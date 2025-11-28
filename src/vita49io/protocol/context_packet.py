@@ -1,20 +1,31 @@
 """Provide helpers for constructing and parsing VITA 49 context packets.
 
+The class now follows a lazy, memoryview-backed design:
+
+* ``from_bytes`` keeps a ``memoryview`` of the raw packet and defers decoding.
+* ``to_bytes`` returns the cached bytes quickly when the packet was not mutated.
+* Optional/large blocks (CIF) are parsed only when accessed.
+
 Examples:
     >>> from vita49io.protocol.context_packet import ContextPacket
     >>> from vita49io.protocol.cif0 import CIF0Fields
-    >>> ContextPacket(packet_type=PacketType.CONTEXT_PACKET, stream_id=1, cif0=CIF0Fields()).cif0 is not None
+    >>> from vita49io.protocol.enums import PacketType
+    >>> ctx = ContextPacket(packet_type=PacketType.CONTEXT_PACKET, stream_id=1, cif0=CIF0Fields())
+    >>> isinstance(ctx.to_bytes(), bytes)
     True
 """
 
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
-from typing import Optional, List, Tuple
+from typing import List, Optional, Tuple
 
 from .cif0 import CIF0Fields
 from .core import (
     Header,
+    LazyBinary,
+    WORD,
     _Common,
     _finalize_words_to_bytes,
     _pack_common_prefix,
@@ -26,68 +37,18 @@ from .enums import PacketType, TSI, TSF
 from .vrt_types import ClassID
 
 
-@dataclass(init=False)
-class ContextPacket:
-    """Represent a VITA 49 context packet including CIF0 metadata.
+@dataclass(init=False, slots=True)
+class ContextPacket(LazyBinary):
+    """Represent a VITA 49 context packet including CIF0 metadata."""
 
-    Args:
-        header (Header): Pre-built header describing the packet layout.
-        cif0 (CIF0Fields): Mandatory CIF0 field structure describing context.
-        stream_id (Optional[int]): Stream identifier if the header indicates one.
-        class_id (Optional[ClassID]): Class identifier tuple attached to the packet.
-        integer_seconds (Optional[int]): Integer seconds timestamp component when TSI is set.
-        fractional_seconds (Optional[int]): Fractional seconds timestamp component when TSF is set.
-        cif_extra_masks (Optional[List[Tuple[int, int]]]): Additional CIF mask words beyond CIF0.
-        raw_cif_fields (Optional[List[int]]): Raw CIF field words not decoded into structures.
-
-    Examples:
-        >>> from vita49io.protocol.context_packet import ContextPacket
-        >>> from vita49io.protocol.cif0 import CIF0Fields
-        >>> from vita49io.protocol.enums import PacketType
-        >>> stream_id = 0x12345678
-        >>> pf = PayloadFormat(
-            packing_method=PackingMethod.PROCESSING_EFFICIENT,
-            sample_type=SampleType.COMPLEX_CARTESIAN,
-            data_item_format_code=int(DataItemFormat.IEEE754_SINGLE),
-            data_item_format=DataItemFormat.IEEE754_SINGLE,
-            sample_component_repeat=False,
-            event_tag_size_bits=0,
-            channel_tag_size_bits=0,
-            data_item_fraction_size_bits=0,
-            item_packing_field_size_bits=32,
-            data_item_size_bits=32,
-            repeat_count=1,
-            vector_size=0,
-        )
-        >>> cif0 = CIF0Fields(
-            sample_rate_hz=1_000_000.0,
-            payload_format=pf,
-        )
-        >>> ctx = ContextPacket(
-            packet_type=PacketType.CONTEXT_PACKET,
-            stream_id=stream_id,
-            tsi=TSI.UTC,
-            tsf=TSF.FRACTIONAL,
-            integer_seconds=1_700_000_000,
-            fractional_seconds=0,
-            cif0=cif0,
-        )
-        >>> ctx_bytes = ctx.to_bytes()
-        >>> ctx_same = ContextPacket.from_bytes(ctx_bytes)
-        
-    """
-    header: Header
-    # Required structured CIF0 describing context information. Set in __init__.
-    cif0: Optional[CIF0Fields] = None
-    stream_id: Optional[int] = None
-    class_id: Optional[ClassID] = None
-    integer_seconds: Optional[int] = None
-    fractional_seconds: Optional[int] = None
-    # Optional list of additional CIF masks found after CIF0 mask.
-    # Each entry is (cif_index, mask) for CIF1..CIF6 when present.
-    cif_extra_masks: Optional[List[Tuple[int, int]]] = None
-    # Raw CIF field words (after CIF0 fields), as 32-bit words
-    raw_cif_fields: Optional[List[int]] = None
+    _header: Header | None = None
+    _stream_id: int | None = None
+    _class_id: ClassID | None = None
+    _integer_seconds: int | None = None
+    _fractional_seconds: int | None = None
+    _cif0: CIF0Fields | None = None
+    _cif_extra_masks: Optional[List[Tuple[int, int]]] = None
+    _raw_cif_fields: Optional[List[int]] = None
 
     def __init__(
         self,
@@ -101,17 +62,18 @@ class ContextPacket:
         class_id: Optional[ClassID] = None,
         integer_seconds: Optional[int] = None,
         fractional_seconds: Optional[int] = None,
-        cif0: CIF0Fields,
+        cif0: Optional[CIF0Fields] = None,
         cif_extra_masks: Optional[List[Tuple[int, int]]] = None,
         raw_cif_fields: Optional[List[int]] = None,
         # If true, set header.indicators_25 (V49.2-only packet)
         requiresVita49_2: bool = False,
         # If true, set header.indicators_24 (Timestamp Mode bit / TSM)
         timestamp_mode: bool = False,
+        _mv: memoryview | None = None,
     ) -> None:
-        if header is None:
-            if packet_type is None:
-                raise TypeError("Either header or packet_type must be provided")
+        # Call base __init__ directly to avoid dataclass/super slot quirks
+        LazyBinary.__init__(self, _mv=_mv)
+        if header is None and packet_type is not None:
             header = Header(
                 packet_type=packet_type,
                 class_id_present=(class_id is not None),
@@ -122,96 +84,180 @@ class ContextPacket:
                 packet_count=int(packet_count),
                 packet_size=0,
             )
-        self.header = header
-        self.stream_id = stream_id
-        self.class_id = class_id
-        self.integer_seconds = integer_seconds
-        self.fractional_seconds = fractional_seconds
-        if cif0 is None:
-            raise TypeError("cif0 is required for ContextPacket")
-        self.cif0 = cif0
-        self.cif_extra_masks = cif_extra_masks
-        self.raw_cif_fields = raw_cif_fields 
+        if header is None and _mv is None:
+            raise TypeError("Either header or packet_type must be provided")
+        self._header = header
+        self._stream_id = stream_id
+        self._class_id = class_id
+        self._integer_seconds = integer_seconds
+        self._fractional_seconds = fractional_seconds
+        self._cif0 = cif0
+        self._cif_extra_masks = cif_extra_masks
+        self._raw_cif_fields = raw_cif_fields
+        # Newly built objects must be encoded; memoryview-backed packets can fast-path
+        if _mv is None:
+            self._mark_dirty()
 
+    # ---------- lazy common prefix ----------
+    def _common_info(self) -> Tuple[_Common, int, int]:
+        def decode(self, mv: memoryview) -> Tuple[_Common, int, int]:
+            common, payload_start, payload_end = _parse_common_from_bytes(mv)
+            if common.header.packet_type is not PacketType.CONTEXT_PACKET:
+                raise ValueError("Not a Context packet type")
+            if self._header is None:
+                self._header = common.header
+            if self._stream_id is None:
+                self._stream_id = common.stream_id
+            if self._class_id is None:
+                self._class_id = common.class_id
+            if self._integer_seconds is None:
+                self._integer_seconds = common.integer_seconds
+            if self._fractional_seconds is None:
+                self._fractional_seconds = common.fractional_seconds
+            return common, payload_start, payload_end
+
+        return self._lazy_field("common_info", decode)
 
     # Convenience accessors expected by tests/users
     @property
+    def header(self) -> Header:
+        if self._header is None:
+            common, _, _ = self._common_info()
+            self._header = common.header
+        return self._header
+
+    @header.setter
+    def header(self, value: Header) -> None:
+        self._header = value
+        self._mark_dirty()
+
+    @property
+    def stream_id(self) -> Optional[int]:
+        if self._stream_id is None:
+            common, _, _ = self._common_info()
+            self._stream_id = common.stream_id
+        return self._stream_id
+
+    @stream_id.setter
+    def stream_id(self, value: Optional[int]) -> None:
+        self._stream_id = value
+        self._mark_dirty()
+
+    @property
+    def class_id(self) -> Optional[ClassID]:
+        if self._class_id is None:
+            common, _, _ = self._common_info()
+            self._class_id = common.class_id
+        return self._class_id
+
+    @class_id.setter
+    def class_id(self, value: Optional[ClassID]) -> None:
+        self._class_id = value
+        self._mark_dirty()
+
+    @property
+    def integer_seconds(self) -> Optional[int]:
+        if self._integer_seconds is None:
+            common, _, _ = self._common_info()
+            self._integer_seconds = common.integer_seconds
+        return self._integer_seconds
+
+    @integer_seconds.setter
+    def integer_seconds(self, value: Optional[int]) -> None:
+        self._integer_seconds = value
+        self._mark_dirty()
+
+    @property
+    def fractional_seconds(self) -> Optional[int]:
+        if self._fractional_seconds is None:
+            common, _, _ = self._common_info()
+            self._fractional_seconds = common.fractional_seconds
+        return self._fractional_seconds
+
+    @fractional_seconds.setter
+    def fractional_seconds(self, value: Optional[int]) -> None:
+        self._fractional_seconds = value
+        self._mark_dirty()
+
+    @property
     def packet_type(self) -> PacketType:
-        """Return the packet type reported by the context packet header.
-
-        Returns:
-            PacketType: The header packet type enumeration.
-
-        Examples:
-            >>> from vita49io.protocol.context_packet import ContextPacket
-            >>> from vita49io.protocol.cif0 import CIF0Fields
-            >>> from vita49io.protocol.enums import PacketType
-            >>> ContextPacket(packet_type=PacketType.CONTEXT_PACKET, stream_id=1, cif0=CIF0Fields()).packet_type
-            <PacketType.CONTEXT_PACKET: 4>
-        """
         return self.header.packet_type
 
     @property
     def tsi(self) -> TSI:
-        """Return the Timestamp Integer (TSI) selection stored in the header.
-
-        Returns:
-            TSI: The integer timestamp mode determining the presence of integer seconds.
-
-        Examples:
-            >>> from vita49io.protocol.context_packet import ContextPacket
-            >>> from vita49io.protocol.cif0 import CIF0Fields
-            >>> from vita49io.protocol.enums import PacketType, TSI
-            >>> ContextPacket(packet_type=PacketType.CONTEXT_PACKET, stream_id=1, cif0=CIF0Fields(), tsi=TSI.UTC).tsi
-            <TSI.UTC: 1>
-        """
         return self.header.tsi
 
     @property
     def tsf(self) -> TSF:
-        """Return the Timestamp Fractional (TSF) selection stored in the header.
-
-        Returns:
-            TSF: The fractional timestamp mode controlling fractional second interpretation.
-
-        Examples:
-            >>> from vita49io.protocol.context_packet import ContextPacket
-            >>> from vita49io.protocol.cif0 import CIF0Fields
-            >>> from vita49io.protocol.enums import PacketType, TSF
-            >>> ContextPacket(packet_type=PacketType.CONTEXT_PACKET, stream_id=1, cif0=CIF0Fields(), tsf=TSF.FRACTIONAL).tsf
-            <TSF.FRACTIONAL: 2>
-        """
         return self.header.tsf
 
     @property
     def packet_count(self) -> int:
-        """Return the rolling packet count from the context packet header.
-
-        Returns:
-            int: The 4-bit packet count sequence number.
-
-        Examples:
-            >>> from vita49io.protocol.context_packet import ContextPacket
-            >>> from vita49io.protocol.cif0 import CIF0Fields
-            >>> from vita49io.protocol.enums import PacketType
-            >>> ContextPacket(packet_type=PacketType.CONTEXT_PACKET, stream_id=1, cif0=CIF0Fields(), packet_count=5).packet_count
-            5
-        """
         return self.header.packet_count
 
+    # ---------- CIF handling ----------
+    def _decode_cif0(self) -> CIF0Fields:
+        if self._cif0 is not None:
+            return self._cif0
+        if self._mv is None:
+            raise ValueError("Cannot decode CIF0 without backing bytes")
+        _, payload_start, payload_end = self._common_info()
+        payload = self._mv[payload_start:payload_end]
+        if len(payload) < 4:
+            raise ValueError("Context packet missing CIF0 mask word")
+        cif0_mask = WORD.unpack_from(payload, 0)[0] & 0xFFFFFFFF
+        pos = 4
+        extra_masks: List[Tuple[int, int]] = []
+        for i in range(1, 7):
+            if (cif0_mask >> i) & 1:
+                if pos + 4 > len(payload):
+                    break
+                extra_masks.append((i, WORD.unpack_from(payload, pos)[0] & 0xFFFFFFFF))
+                pos += 4
+        remaining = payload[pos:]
+        remaining_words = [w[0] for w in struct.iter_unpack(">I", remaining)]
+        cif0, used_cif0_words = CIF0Fields.parse_from_mask(cif0_mask, remaining_words)
+        raw_cif_fields = remaining_words[used_cif0_words:]
+
+        self._cif0 = cif0
+        self._cif_extra_masks = extra_masks or None
+        self._raw_cif_fields = raw_cif_fields or None
+        return cif0
+
+    @property
+    def cif0(self) -> CIF0Fields:
+        if self._cif0 is None:
+            return self._decode_cif0()
+        return self._cif0
+
+    @cif0.setter
+    def cif0(self, value: CIF0Fields) -> None:
+        self._cif0 = value
+        self._mark_dirty()
+
+    @property
+    def cif_extra_masks(self) -> Optional[List[Tuple[int, int]]]:
+        if self._cif_extra_masks is None and self._cif0 is None and self._mv is not None:
+            self._decode_cif0()
+        return self._cif_extra_masks
+
+    @cif_extra_masks.setter
+    def cif_extra_masks(self, value: Optional[List[Tuple[int, int]]]) -> None:
+        self._cif_extra_masks = value
+        self._mark_dirty()
+
+    @property
+    def raw_cif_fields(self) -> Optional[List[int]]:
+        if self._raw_cif_fields is None and self._cif0 is None and self._mv is not None:
+            self._decode_cif0()
+        return self._raw_cif_fields
+
+    @raw_cif_fields.setter
+    def raw_cif_fields(self, value: Optional[List[int]]) -> None:
+        self._raw_cif_fields = value
+        self._mark_dirty()
+
     def __repr__(self) -> str:  # pragma: no cover - human-facing formatting
-        """Generate a detailed string for debugging context packets.
-
-        Returns:
-            str: A formatted string enumerating key header and CIF details.
-
-        Examples:
-            >>> from vita49io.protocol.context_packet import ContextPacket
-            >>> from vita49io.protocol.cif0 import CIF0Fields
-            >>> from vita49io.protocol.enums import PacketType
-            >>> 'ContextPacket(' in repr(ContextPacket(packet_type=PacketType.CONTEXT_PACKET, stream_id=1, cif0=CIF0Fields()))
-            True
-        """
         def _hex32(v: int) -> str:
             return f"0x{v & 0xFFFFFFFF:08X}"
 
@@ -231,13 +277,11 @@ class ContextPacket:
             parts.append(f"integer_seconds={self.integer_seconds}")
         if self.fractional_seconds is not None:
             parts.append(f"fractional_seconds={int(self.fractional_seconds)}")
-        # CIF summary
-        parts.append(f"cif0={self.cif0}")
+        parts.append(f"cif0={self._cif0 if self._cif0 is not None else 'lazy'}")
         if self.cif_extra_masks:
             masks_summ = ", ".join(f"CIF{i}:{m & 0xFFFFFFFF:#010x}" for i, m in self.cif_extra_masks)
             parts.append(f"extra_masks=[{masks_summ}]")
         parts.append(f"packet_count={self.header.packet_count}")
-        # Indicator bits (for debugging)
         if self.header.indicators_25:
             parts.append("indicators_25=True")
         if self.header.indicators_24:
@@ -245,30 +289,18 @@ class ContextPacket:
         return f"ContextPacket({', '.join(parts)})"
 
     def to_bytes(self) -> bytes:
-        """Serialize the context packet into bytes.
+        """Serialize the context packet into bytes, with zero-copy fast-path."""
+        if not self._dirty and self._mv is not None:
+            return self._mv.tobytes()
 
-        Returns:
-            bytes: The serialized packet including header and CIF fields.
-
-        Raises:
-            ValueError: If required fields such as packet type or Stream ID are inconsistent.
-
-        Examples:
-            >>> from vita49io.protocol.context_packet import ContextPacket
-            >>> from vita49io.protocol.cif0 import CIF0Fields
-            >>> from vita49io.protocol.enums import PacketType
-            >>> pkt = ContextPacket(packet_type=PacketType.CONTEXT_PACKET, stream_id=1, cif0=CIF0Fields())
-            >>> isinstance(pkt.to_bytes(), bytes)
-            True
-        """
-        if self.header.packet_type is not PacketType.CONTEXT_PACKET:
+        hdr = self.header
+        if hdr.packet_type is not PacketType.CONTEXT_PACKET:
             raise ValueError("ContextPacket must have CONTEXT_PACKET packet_type")
         if self.stream_id is None:
             raise ValueError("ContextPacket requires a Stream ID")
 
-        # Build common prefix via _Common helper (stream_id required for context)
         common = _Common(
-            header=self.header,
+            header=hdr,
             stream_id=self.stream_id,
             class_id=self.class_id,
             integer_seconds=self.integer_seconds,
@@ -276,15 +308,13 @@ class ContextPacket:
         )
         words = _pack_common_prefix(common)
 
-        # Build payload words: combined CIF0 mask, extra masks, CIF0 fields, then raw CIF fields
         if self.cif0 is None:
             raise TypeError("cif0 is required for ContextPacket")
-        cif0 = self.cif0
-        cif0_words: List[int] = _payload_bytes_to_words(cif0.pack())
+        cif0_words: List[int] = _payload_bytes_to_words(self.cif0.pack())
         cif0_mask = cif0_words[0] & 0xFFFFFFFF
         if self.cif_extra_masks:
             for i, _m in self.cif_extra_masks:
-                cif0_mask |= (1 << i)
+                cif0_mask |= 1 << i
         words.append(_u32(cif0_mask))
         for _i, m in (self.cif_extra_masks or []):
             words.append(_u32(m))
@@ -292,70 +322,16 @@ class ContextPacket:
         if self.raw_cif_fields:
             words.extend(self.raw_cif_fields)
 
-        return _finalize_words_to_bytes(words)
+        raw_bytes = _finalize_words_to_bytes(words)
+        self._mv = memoryview(raw_bytes)
+        self._dirty = False
+        return raw_bytes
 
-    @staticmethod
-    def from_bytes(data: bytes) -> "ContextPacket":
-        """Parse a ContextPacket instance from serialized bytes.
+    @classmethod
+    def from_bytes(cls, data: bytes | bytearray | memoryview) -> "ContextPacket":
+        """Keep a memoryview of the packet and decode lazily."""
+        mv = data if isinstance(data, memoryview) else memoryview(data)
+        return cls(_mv=mv)
 
-        Args:
-            data (bytes): Raw VITA 49 packet bytes beginning at the header.
-
-        Returns:
-            ContextPacket: A decoded context packet with parsed CIF0 fields.
-
-        Raises:
-            ValueError: If the bytes do not contain a valid context packet structure.
-
-        Examples:
-            >>> from vita49io.protocol.context_packet import ContextPacket
-            >>> from vita49io.protocol.cif0 import CIF0Fields
-            >>> from vita49io.protocol.enums import PacketType
-            >>> pkt = ContextPacket(packet_type=PacketType.CONTEXT_PACKET, stream_id=1, cif0=CIF0Fields())
-            >>> ContextPacket.from_bytes(pkt.to_bytes()).stream_id
-            1
-        """
-        mv = memoryview(data)
-        common, payload_start, payload_end = _parse_common_from_bytes(mv)
-        header = common.header
-        if header.packet_type is not PacketType.CONTEXT_PACKET:
-            raise ValueError("Not a Context packet type")
-
-        payload_mv = mv[payload_start:payload_end]
-        if len(payload_mv) < 4:
-            raise ValueError("Context packet missing CIF0 mask word")
-
-        parsed_cif0: Optional[CIF0Fields] = None
-        extra_masks: List[Tuple[int, int]] = []
-        raw_cif_fields: Optional[List[int]] = None
-
-        cif0_mask = int.from_bytes(payload_mv[0:4], byteorder="big") & 0xFFFFFFFF
-        pos = 4
-        for i in range(1, 7):
-            if (cif0_mask >> i) & 1:
-                if pos + 4 > len(payload_mv):
-                    break
-                extra_masks.append((i, int.from_bytes(payload_mv[pos : pos + 4], byteorder="big")))
-                pos += 4
-
-        remaining = payload_mv[pos:]
-        remaining_words = [
-            int.from_bytes(remaining[i : i + 4], byteorder="big")
-            for i in range(0, len(remaining), 4)
-        ]
-
-        parsed_cif0, used_cif0_words = CIF0Fields.parse_from_mask(cif0_mask, remaining_words)
-        raw_cif_fields = remaining_words[used_cif0_words:]
-
-        return ContextPacket(
-            header=header,
-            stream_id=common.stream_id,
-            class_id=common.class_id,
-            integer_seconds=common.integer_seconds,
-            fractional_seconds=common.fractional_seconds,
-            cif0=parsed_cif0,
-            cif_extra_masks=extra_masks if extra_masks else None,
-            raw_cif_fields=raw_cif_fields,
-        )
 
 __all__ = ["ContextPacket"]
