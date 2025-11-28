@@ -33,6 +33,7 @@ from .utils import (
     _from_s64_fixed20,
     _from_u64_fixed20,
     _payload_bytes_to_words,
+    _payload_words_to_bytes,
     _to_s16_fixed7,
     _to_s64_fixed20,
     _to_u64_fixed20,

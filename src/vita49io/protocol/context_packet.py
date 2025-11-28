@@ -122,6 +122,8 @@ class ContextPacket(LazyBinary):
     @property
     def header(self) -> Header:
         if self._header is None:
+            if self._mv is None:
+                raise ValueError("Header not available; packet not backed by bytes")
             common, _, _ = self._common_info()
             self._header = common.header
         return self._header
@@ -133,7 +135,7 @@ class ContextPacket(LazyBinary):
 
     @property
     def stream_id(self) -> Optional[int]:
-        if self._stream_id is None:
+        if self._stream_id is None and self._mv is not None:
             common, _, _ = self._common_info()
             self._stream_id = common.stream_id
         return self._stream_id
@@ -145,7 +147,7 @@ class ContextPacket(LazyBinary):
 
     @property
     def class_id(self) -> Optional[ClassID]:
-        if self._class_id is None:
+        if self._class_id is None and self._mv is not None:
             common, _, _ = self._common_info()
             self._class_id = common.class_id
         return self._class_id
@@ -157,7 +159,7 @@ class ContextPacket(LazyBinary):
 
     @property
     def integer_seconds(self) -> Optional[int]:
-        if self._integer_seconds is None:
+        if self._integer_seconds is None and self._mv is not None:
             common, _, _ = self._common_info()
             self._integer_seconds = common.integer_seconds
         return self._integer_seconds
@@ -169,7 +171,7 @@ class ContextPacket(LazyBinary):
 
     @property
     def fractional_seconds(self) -> Optional[int]:
-        if self._fractional_seconds is None:
+        if self._fractional_seconds is None and self._mv is not None:
             common, _, _ = self._common_info()
             self._fractional_seconds = common.fractional_seconds
         return self._fractional_seconds
