@@ -10,14 +10,6 @@ def _u32(v: int) -> int:
     return v & 0xFFFFFFFF
 
 
-def _pack_u32_le(v: int) -> bytes:
-    return _u32(v).to_bytes(4, byteorder="big")
-
-
-def _unpack_u32_be(b: bytes) -> int:
-    return int.from_bytes(b, byteorder="big")
-
-
 def _payload_bytes_to_words(payload: Union[bytes, memoryview]) -> List[int]:
     if not payload:
         return []
@@ -99,8 +91,6 @@ def _decode_fixed_point(raw: int, scale: int) -> float:
 
 __all__ = [
     "_u32",
-    "_pack_u32_le",
-    "_unpack_u32_be",
     "_payload_bytes_to_words",
     "_payload_words_to_bytes",
     "_to_s64_fixed20",

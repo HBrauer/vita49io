@@ -17,8 +17,6 @@ from .enums import PacketType, TSI, TSF
 from .utils import (
     _payload_bytes_to_words,
     _payload_words_to_bytes,
-    _pack_u32_le,
-    _unpack_u32_be,
     _u32,
 )
 from .vrt_types import ClassID
@@ -371,7 +369,7 @@ def _parse_common_from_bytes(data: memoryview) -> Tuple[_Common, int, int]:
     if total_len < 4 or total_len % 4 != 0:
         raise ValueError("Invalid VRT packet length")
 
-    w0 = int.from_bytes(data[0:4], byteorder="big")
+    w0 = WORD.unpack_from(data, 0)[0]
     hdr = Header.parse(w0)
     expected = hdr.packet_size * 4
     if expected != total_len:
@@ -390,14 +388,14 @@ def _parse_common_from_bytes(data: memoryview) -> Tuple[_Common, int, int]:
     ):
         if idx + 4 > total_len:
             raise ValueError("Truncated after header: missing Stream ID")
-        stream_id = int.from_bytes(data[idx : idx + 4], byteorder="big")
+        stream_id = WORD.unpack_from(data, idx)[0]
         idx += 4
 
     if hdr.class_id_present:
         if idx + 8 > total_len:
             raise ValueError("Truncated: missing Class ID words")
-        w_a = int.from_bytes(data[idx : idx + 4], byteorder="big")
-        w_b = int.from_bytes(data[idx + 4 : idx + 8], byteorder="big")
+        w_a = WORD.unpack_from(data, idx)[0]
+        w_b = WORD.unpack_from(data, idx + 4)[0]
         idx += 8
         oui = (w_a >> 8) & 0xFFFFFF
         information_class = (w_b >> 16) & 0xFFFF
@@ -407,14 +405,14 @@ def _parse_common_from_bytes(data: memoryview) -> Tuple[_Common, int, int]:
     if hdr.tsi != TSI.NONE:
         if idx + 4 > total_len:
             raise ValueError("Truncated: missing integer seconds")
-        integer_seconds = int.from_bytes(data[idx : idx + 4], byteorder="big")
+        integer_seconds = WORD.unpack_from(data, idx)[0]
         idx += 4
 
     if hdr.tsf != TSF.NONE:
         if idx + 8 > total_len:
             raise ValueError("Truncated: missing fractional seconds")
-        msw = int.from_bytes(data[idx : idx + 4], byteorder="big")
-        lsw = int.from_bytes(data[idx + 4 : idx + 8], byteorder="big")
+        msw = WORD.unpack_from(data, idx)[0]
+        lsw = WORD.unpack_from(data, idx + 4)[0]
         fractional_seconds = ((msw & 0xFFFFFFFF) << 32) | (lsw & 0xFFFFFFFF)
         idx += 8
 
@@ -436,8 +434,6 @@ __all__ = [
     "TSF",
     "ClassID",
     "_u32",
-    "_pack_u32_le",
-    "_unpack_u32_be",
     "_payload_bytes_to_words",
     "_payload_words_to_bytes",
     "WORD",
