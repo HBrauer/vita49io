@@ -24,8 +24,20 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 from enum import IntEnum
 
-from .core import _payload_bytes_to_words, _payload_words_to_bytes, _u32
 from .enums import TSI, TSF
+from .utils import (
+    _decode_fixed_point,
+    _encode_fixed_point,
+    _from_s16_fixed7,
+    _from_s64_fixed20,
+    _from_u64_fixed20,
+    _payload_bytes_to_words,
+    _payload_words_to_bytes,
+    _to_s16_fixed7,
+    _to_s64_fixed20,
+    _to_u64_fixed20,
+    _u32,
+)
 
 
 # ---------------------------------------------
@@ -227,71 +239,12 @@ class PayloadFormat:
         return _u32(w0), _u32(w1)
 
 
-def _to_s64_fixed20(v: float) -> Tuple[int, int]:
-    scale = 1 << 20
-    i = int(round(v * scale)) & ((1 << 64) - 1)
-    hi = (i >> 32) & 0xFFFFFFFF
-    lo = i & 0xFFFFFFFF
-    return hi, lo
-
-
-def _from_s64_fixed20(hi: int, lo: int) -> float:
-    i = ((hi & 0xFFFFFFFF) << 32) | (lo & 0xFFFFFFFF)
-    if i & (1 << 63):
-        i -= 1 << 64
-    return i / float(1 << 20)
-
-
-def _to_u64_fixed20(v: float) -> Tuple[int, int]:
-    if v < 0:
-        raise ValueError("Unsigned fixed-point cannot be negative")
-    scale = 1 << 20
-    i = int(round(v * scale)) & ((1 << 64) - 1)
-    hi = (i >> 32) & 0xFFFFFFFF
-    lo = i & 0xFFFFFFFF
-    return hi, lo
-
-
-def _from_u64_fixed20(hi: int, lo: int) -> float:
-    i = ((hi & 0xFFFFFFFF) << 32) | (lo & 0xFFFFFFFF)
-    return i / float(1 << 20)
-
-
-def _to_s16_fixed7(v: float) -> int:
-    scale = 1 << 7
-    i = int(round(v * scale))
-    if i < -32768:
-        i = -32768
-    if i > 32767:
-        i = 32767
-    return i & 0xFFFF
-
-
-def _from_s16_fixed7(w: int) -> float:
-    v = w & 0xFFFF
-    if v & 0x8000:
-        v -= 0x10000
-    return v / float(1 << 7)
-
-
 ANGLE_SCALE = 1 << 22  # Geolocation Angle Format radix (bit 22)
 ALT_SCALE = 1 << 5  # Altitude radix (bit 5)
 SPEED_SCALE = 1 << 16  # Speed over ground radix (bit 16)
 POS_SCALE = 1 << 5  # ECEF position radix (bit 5)
 VEL_SCALE = 1 << 16  # ECEF velocity radix (bit 16)
 ATT_SCALE = 1 << 22  # ECEF attitude radix (bit 22)
-
-
-def _encode_fixed_point(value: float, scale: int) -> int:
-    raw = int(round(value * scale))
-    return _u32(raw)
-
-
-def _decode_fixed_point(raw: int, scale: int) -> float:
-    v = raw & 0xFFFFFFFF
-    if v & 0x80000000:
-        v -= 0x100000000
-    return v / float(scale)
 
 
 @dataclass

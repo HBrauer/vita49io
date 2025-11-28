@@ -13,6 +13,13 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from .enums import PacketType, TSI, TSF
+from .utils import (
+    _payload_bytes_to_words,
+    _payload_words_to_bytes,
+    _pack_u32_le,
+    _unpack_u32_be,
+    _u32,
+)
 from .vrt_types import ClassID
 
 
@@ -25,32 +32,6 @@ _HDR_TSI_MASK = 0x00C00000  # 2 bits
 _HDR_TSF_MASK = 0x00300000  # 2 bits
 _HDR_PKT_CNT_MASK = 0x000F0000  # 4 bits
 _HDR_PKT_SIZE_MASK = 0x0000FFFF  # 16 bits (32-bit words)
-
-
-def _u32(v: int) -> int:
-    return v & 0xFFFFFFFF
-
-
-def _pack_u32_le(v: int) -> bytes:
-    return _u32(v).to_bytes(4, byteorder="big")
-
-
-def _unpack_u32_be(b: bytes) -> int:
-    return int.from_bytes(b, byteorder="big")
-
-
-def _payload_bytes_to_words(payload: bytes) -> List[int]:
-    data = payload or b""
-    if len(data) % 4 != 0:
-        data += b"\x00" * (4 - (len(data) % 4))
-    return [_unpack_u32_be(data[i : i + 4]) for i in range(0, len(data), 4)]
-
-
-def _payload_words_to_bytes(words: List[int]) -> bytes:
-    b = bytearray()
-    for w in words:
-        b += _pack_u32_le(w)
-    return bytes(b)
 
 
 @dataclass
