@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import List, Tuple
+import struct
+from typing import List, Tuple, Union
 
 
 def _u32(v: int) -> int:
@@ -17,18 +18,24 @@ def _unpack_u32_be(b: bytes) -> int:
     return int.from_bytes(b, byteorder="big")
 
 
-def _payload_bytes_to_words(payload: bytes) -> List[int]:
-    data = payload or b""
-    if len(data) % 4 != 0:
-        data += b"\x00" * (4 - (len(data) % 4))
-    return [_unpack_u32_be(data[i : i + 4]) for i in range(0, len(data), 4)]
+def _payload_bytes_to_words(payload: Union[bytes, memoryview]) -> List[int]:
+    if not payload:
+        return []
+    mv = memoryview(payload)
+    if len(mv) % 4 != 0:
+        data = mv.tobytes() + b"\x00" * (4 - (len(mv) % 4))
+    else:
+        data = mv
+    return [w[0] for w in struct.iter_unpack(">I", data)]
 
 
 def _payload_words_to_bytes(words: List[int]) -> bytes:
-    b = bytearray()
-    for w in words:
-        b += _pack_u32_le(w)
-    return bytes(b)
+    if not words:
+        return b""
+    out = bytearray(len(words) * 4)
+    for i, w in enumerate(words):
+        struct.pack_into(">I", out, i * 4, _u32(w))
+    return bytes(out)
 
 
 def _to_s64_fixed20(v: float) -> Tuple[int, int]:

@@ -18,9 +18,8 @@ from .core import (
     _Common,
     _finalize_words_to_bytes,
     _pack_common_prefix,
-    _parse_common_from_words,
+    _parse_common_from_bytes,
     _payload_bytes_to_words,
-    _unpack_u32_be,
     _u32,
 )
 from .enums import PacketType, TSI, TSF
@@ -316,38 +315,37 @@ class ContextPacket:
             >>> ContextPacket.from_bytes(pkt.to_bytes()).stream_id
             1
         """
-        if len(data) < 4 or len(data) % 4 != 0:
-            raise ValueError("Invalid VRT packet length")
-        words = [_unpack_u32_be(data[i : i + 4]) for i in range(0, len(data), 4)]
-        common, idx, end_idx = _parse_common_from_words(words)
+        mv = memoryview(data)
+        common, payload_start, payload_end = _parse_common_from_bytes(mv)
         header = common.header
         if header.packet_type is not PacketType.CONTEXT_PACKET:
             raise ValueError("Not a Context packet type")
 
-        # Work with payload as words directly to avoid redundant conversions.
-        p_words = words[idx:end_idx]
+        payload_mv = mv[payload_start:payload_end]
+        if len(payload_mv) < 4:
+            raise ValueError("Context packet missing CIF0 mask word")
 
-        # Best-effort parse of CIF masks and CIF0 fields; capture remaining raw CIF fields.
         parsed_cif0: Optional[CIF0Fields] = None
         extra_masks: List[Tuple[int, int]] = []
         raw_cif_fields: Optional[List[int]] = None
 
-        cif0_mask = p_words[0] & 0xFFFFFFFF
-        w_idx = 1
-        # Collect any additional CIF mask words (CIF1..CIF6)
+        cif0_mask = int.from_bytes(payload_mv[0:4], byteorder="big") & 0xFFFFFFFF
+        pos = 4
         for i in range(1, 7):
             if (cif0_mask >> i) & 1:
-                if w_idx >= len(p_words):
-                    # Do not raise; just stop collecting if truncated
+                if pos + 4 > len(payload_mv):
                     break
-                extra_masks.append((i, p_words[w_idx] & 0xFFFFFFFF))
-                w_idx += 1
+                extra_masks.append((i, int.from_bytes(payload_mv[pos : pos + 4], byteorder="big")))
+                pos += 4
 
-        # Parse CIF0 fields from remaining words
-        parsed_cif0, used_cif0_words = CIF0Fields.parse_from_mask(cif0_mask, p_words[w_idx:])
+        remaining = payload_mv[pos:]
+        remaining_words = [
+            int.from_bytes(remaining[i : i + 4], byteorder="big")
+            for i in range(0, len(remaining), 4)
+        ]
 
-        
-        raw_cif_fields = p_words[w_idx + used_cif0_words :]
+        parsed_cif0, used_cif0_words = CIF0Fields.parse_from_mask(cif0_mask, remaining_words)
+        raw_cif_fields = remaining_words[used_cif0_words:]
 
         return ContextPacket(
             header=header,

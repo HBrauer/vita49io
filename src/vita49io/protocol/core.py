@@ -10,7 +10,8 @@ Examples:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
+import struct
+from typing import List, Optional, Tuple
 
 from .enums import PacketType, TSI, TSF
 from .utils import (
@@ -232,9 +233,9 @@ def _pack_common_prefix(c: _Common) -> List[int]:
 def _finalize_words_to_bytes(words: List[int]) -> bytes:
     # Update size in-place while preserving other bits
     words[0] = (words[0] & ~_HDR_PKT_SIZE_MASK) | (len(words) & _HDR_PKT_SIZE_MASK)
-    out = bytearray()
-    for w in words:
-        out += _pack_u32_le(w)
+    out = bytearray(len(words) * 4)
+    for i, w in enumerate(words):
+        struct.pack_into(">I", out, i * 4, _u32(w))
     return bytes(out)
 
 
@@ -305,6 +306,71 @@ def _parse_common_from_words(words: List[int]) -> tuple[_Common, int, int]:
     return common, idx, end_idx
 
 
+def _parse_common_from_bytes(data: memoryview) -> Tuple[_Common, int, int]:
+    """Fast-path parser that avoids expanding the full payload into ints."""
+    total_len = len(data)
+    if total_len < 4 or total_len % 4 != 0:
+        raise ValueError("Invalid VRT packet length")
+
+    w0 = int.from_bytes(data[0:4], byteorder="big")
+    hdr = Header.parse(w0)
+    expected = hdr.packet_size * 4
+    if expected != total_len:
+        raise ValueError("Packet size mismatch")
+
+    idx = 4
+    stream_id: Optional[int] = None
+    class_id: Optional[ClassID] = None
+    integer_seconds: Optional[int] = None
+    fractional_seconds: Optional[int] = None
+
+    if hdr.packet_type in (
+        PacketType.IF_DATA_WITH_STREAM_ID,
+        PacketType.EXTENSION_DATA_WITH_STREAM_ID,
+        PacketType.CONTEXT_PACKET,
+    ):
+        if idx + 4 > total_len:
+            raise ValueError("Truncated after header: missing Stream ID")
+        stream_id = int.from_bytes(data[idx : idx + 4], byteorder="big")
+        idx += 4
+
+    if hdr.class_id_present:
+        if idx + 8 > total_len:
+            raise ValueError("Truncated: missing Class ID words")
+        w_a = int.from_bytes(data[idx : idx + 4], byteorder="big")
+        w_b = int.from_bytes(data[idx + 4 : idx + 8], byteorder="big")
+        idx += 8
+        oui = (w_a >> 8) & 0xFFFFFF
+        information_class = (w_b >> 16) & 0xFFFF
+        packet_class = w_b & 0xFFFF
+        class_id = (oui, information_class, packet_class)
+
+    if hdr.tsi != TSI.NONE:
+        if idx + 4 > total_len:
+            raise ValueError("Truncated: missing integer seconds")
+        integer_seconds = int.from_bytes(data[idx : idx + 4], byteorder="big")
+        idx += 4
+
+    if hdr.tsf != TSF.NONE:
+        if idx + 8 > total_len:
+            raise ValueError("Truncated: missing fractional seconds")
+        msw = int.from_bytes(data[idx : idx + 4], byteorder="big")
+        lsw = int.from_bytes(data[idx + 4 : idx + 8], byteorder="big")
+        fractional_seconds = ((msw & 0xFFFFFFFF) << 32) | (lsw & 0xFFFFFFFF)
+        idx += 8
+
+    end_idx = total_len
+
+    common = _Common(
+        header=hdr,
+        stream_id=stream_id,
+        class_id=class_id,
+        integer_seconds=integer_seconds,
+        fractional_seconds=fractional_seconds,
+    )
+    return common, idx, end_idx
+
+
 __all__ = [
     "PacketType",
     "TSI",
@@ -320,5 +386,6 @@ __all__ = [
     "_pack_common_prefix",
     "_finalize_words_to_bytes",
     "_parse_common_from_words",
+    "_parse_common_from_bytes",
 ]
 

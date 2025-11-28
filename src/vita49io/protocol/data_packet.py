@@ -10,7 +10,7 @@ Examples:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Union
 import numpy as np
 
 from .core import (
@@ -18,10 +18,9 @@ from .core import (
     _Common,
     _finalize_words_to_bytes,
     _pack_common_prefix,
-    _parse_common_from_words,
+    _parse_common_from_bytes,
     _payload_bytes_to_words,
     _payload_words_to_bytes,
-    _unpack_u32_be,
     _u32,
 )
 from .enums import PacketType, TSI, TSF
@@ -48,8 +47,7 @@ def _normalize_iq_to_reference_level(
     vpk = _reflevel_dbm_to_vpk(ref_dbm)
     if not np.isfinite(vpk) or vpk <= 0.0:
         raise ValueError("Computed peak voltage must be finite and positive")
-    scale =  vpk
-    print(f"Normalizing IQ samples to reference level {ref_dbm} dBmFS (Vpk={vpk:.6f} V), scale factor {scale:.6f}")
+    scale = vpk
     return np.asarray(iq) * scale
 
 
@@ -86,7 +84,7 @@ class DataPacket:
     class_id: Optional[ClassID] = None
     integer_seconds: Optional[int] = None
     fractional_seconds: Optional[int] = None
-    payload: bytes = b""
+    payload: Union[bytes, memoryview] = b""
     trailer: Optional[int] = None
     validate_strict: bool = False
     # Optional decoded IQ samples (complex64) when a compatible PayloadFormat
@@ -108,7 +106,7 @@ class DataPacket:
         class_id: Optional[ClassID] = None,
         integer_seconds: Optional[int] = None,
         fractional_seconds: Optional[int] = None,
-        payload: bytes = b"",
+        payload: Union[bytes, memoryview] = b"",
         trailer: Optional[int] = None,
         # Optional decoded IQ
         iq: Optional["np.ndarray"] = None,
@@ -347,12 +345,22 @@ class DataPacket:
         return _finalize_words_to_bytes(words)
 
     @staticmethod
-    def from_bytes(data: bytes, payload_format: Optional[PayloadFormat] = None) -> "DataPacket":
+    def from_bytes(
+        data: Union[bytes, bytearray, memoryview],
+        payload_format: Optional[PayloadFormat] = None,
+        *,
+        decode_iq: bool = True,
+        copy_payload: bool = True,
+    ) -> "DataPacket":
         """Construct a DataPacket from serialized VITA 49 bytes.
 
         Args:
             data (bytes): Raw packet bytes starting with the VITA 49 header word.
             payload_format (Optional[PayloadFormat]): Optional payload metadata used to decode IQ samples.
+            decode_iq (bool): When False, skip IQ decoding even if a payload_format is provided
+                (useful for fast metadata-only parsing and raw payload access).
+            copy_payload (bool): When False, keep a memoryview of the payload instead of copying
+                to bytes (useful for zero-copy slicing or defering conversions).
 
         Returns:
             DataPacket: The decoded packet with header, payload, and optional IQ samples.
@@ -367,10 +375,12 @@ class DataPacket:
             >>> DataPacket.from_bytes(pkt.to_bytes()).stream_id
             1
         """
-        if len(data) < 4 or len(data) % 4 != 0:
+        mv = memoryview(data)
+        total_len = len(mv)
+        if total_len < 4 or total_len % 4 != 0:
             raise ValueError("Invalid VRT packet length")
-        words = [_unpack_u32_be(data[i : i + 4]) for i in range(0, len(data), 4)]
-        common, idx, end_idx = _parse_common_from_words(words)
+
+        common, payload_start, payload_end = _parse_common_from_bytes(mv)
         header = common.header
         if header.packet_type not in (
             PacketType.IF_DATA_WITHOUT_STREAM_ID,
@@ -379,18 +389,20 @@ class DataPacket:
             PacketType.EXTENSION_DATA_WITH_STREAM_ID,
         ):
             raise ValueError("Not a Data packet type")
-        # Determine trailer presence from header.indicators_26
+
         trailer: Optional[int] = None
         if header.indicators_26:
-            if end_idx <= idx:
+            if payload_end - payload_start < 4:
                 raise ValueError("Truncated packet: trailer indicated but no words present")
-            trailer = words[-1]
-            end_idx = len(words) - 1
-        payload = _payload_words_to_bytes(words[idx:end_idx])
+            trailer = int.from_bytes(mv[payload_end - 4 : payload_end], byteorder="big")
+            payload_end -= 4
+
+        payload_mv = mv[payload_start:payload_end]
+        payload_bytes: Union[bytes, memoryview] = payload_mv.tobytes() if copy_payload else payload_mv
 
         iq = None
-        if payload_format is not None:
-            iq = _decode_iq_payload(payload, payload_format)
+        if decode_iq and payload_format is not None:
+            iq = _decode_iq_payload(payload_bytes, payload_format)
 
         return DataPacket(
             header=header,
@@ -398,7 +410,7 @@ class DataPacket:
             class_id=common.class_id,
             integer_seconds=common.integer_seconds,
             fractional_seconds=common.fractional_seconds,
-            payload=payload,
+            payload=payload_bytes,
             trailer=trailer,
             iq=iq,
         )
