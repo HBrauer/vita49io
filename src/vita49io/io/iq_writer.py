@@ -73,6 +73,7 @@ class IQStreamWriter:
         tsf (TSF): Timestamp Fractional selection for emitted packets.
         class_id (Optional[ClassID]): Class identifier to attach to packets.
         requires_vita49_2 (bool): Flag to set V49.2 indicator bit.
+        frequency_domain (bool): Set the spectrum (S) bit to indicate frequency-domain Signal Spectral Data.
         start_time_epoch_s (Optional[float]): Initial epoch time for packet timestamps.
         bandwidth_hz (Optional[float]): Optional CIF0 bandwidth metadata.
         if_reference_frequency_hz (Optional[float]): Optional CIF0 IF reference frequency.
@@ -124,6 +125,7 @@ class IQStreamWriter:
     tsf: TSF = TSF.FRACTIONAL
     class_id: Optional[ClassID] = None
     requires_vita49_2: bool = False
+    frequency_domain: bool = False
 
     # Initial wall-clock start time (epoch seconds). If None, uses now (UTC).
     start_time_epoch_s: Optional[float] = None
@@ -264,7 +266,7 @@ class IQStreamWriter:
             class_id_present=(self.class_id is not None),
             indicators_26=False,
             indicators_25=bool(self.requires_vita49_2),
-            indicators_24=False,
+            indicators_24=bool(self.frequency_domain),
             tsi=self.tsi,
             tsf=self.tsf,
             packet_count=(self._packet_count & 0xF),

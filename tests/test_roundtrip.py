@@ -1,6 +1,7 @@
 import unittest
 
 from vita49io import DataPacket, ContextPacket, PacketType, TSI, TSF, CIF0Fields
+from vita49io.protocol.core import Header
 
 
 class TestVRT(unittest.TestCase):
@@ -26,6 +27,29 @@ class TestVRT(unittest.TestCase):
         self.assertEqual(q.fractional_seconds, 0x01020304)
         self.assertEqual(q.payload, b"\xDE\xAD\xBE\xEF\x00\x11\x22\x33")
         self.assertEqual(q.packet_count, 7)
+
+    def test_frequency_domain_sets_s_bit(self):
+        hdr = Header(
+            packet_type=PacketType.IF_DATA_WITH_STREAM_ID,
+            class_id_present=False,
+            indicators_26=False,
+            indicators_25=False,
+            indicators_24=True,
+            tsi=TSI.NONE,
+            tsf=TSF.NONE,
+            packet_count=0,
+            packet_size=0,
+        )
+        p = DataPacket(
+            header=hdr,
+            stream_id=0x12340001,
+            payload=b"\x00\x01\x02\x03",
+        )
+        raw = p.to_bytes()
+        q = DataPacket.from_bytes(raw)
+
+        self.assertTrue(q.header.indicators_24)
+        self.assertEqual(q.stream_id, 0x12340001)
 
     def test_with_class_id_and_no_trailer(self):
         # Raw CIF fields to carry alongside CIF0 (1 word)
@@ -273,6 +297,23 @@ class TestVRT(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             writer.build_data_packet_bytes(np.zeros(4, dtype=np.complex64))
+
+    def test_iq_stream_writer_frequency_domain_packets(self):
+        import numpy as np
+        from vita49io.io import IQStreamWriter
+
+        writer = IQStreamWriter(
+            stream_id=9,
+            sample_rate_hz=1e6,
+            frequency_domain=True,
+        )
+
+        pkt = writer.build_data_packet(np.zeros(4, dtype=np.complex64))
+        self.assertTrue(pkt.frequency_domain)
+
+        raw = writer.build_data_packet_bytes(np.zeros(4, dtype=np.complex64))
+        parsed = DataPacket.from_bytes(raw, payload_format=writer.payload_format)
+        self.assertTrue(parsed.frequency_domain)
 
 
 if __name__ == "__main__":

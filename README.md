@@ -112,11 +112,85 @@ same = DataPacket.from_bytes(raw, payload_format=pf)
 iq = same.iq  # complex64 array of shape (2,)
 ```
 
+Example: create frequency-domain context + data packets
+```python
+import numpy as np
+from vita49io import ContextPacket, DataPacket, PacketType, TSI, TSF, CIF0Fields
+from vita49io.protocol.cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
+from vita49io.protocol.core import Header
+
+stream_id = 0x2468ACE0
+
+payload_format = PayloadFormat(
+    packing_method=PackingMethod.PROCESSING_EFFICIENT,
+    sample_type=SampleType.COMPLEX_CARTESIAN,
+    data_item_format_code=int(DataItemFormat.IEEE754_SINGLE),
+    data_item_format=DataItemFormat.IEEE754_SINGLE,
+    sample_component_repeat=False,
+    event_tag_size_bits=0,
+    channel_tag_size_bits=0,
+    data_item_fraction_size_bits=0,
+    item_packing_field_size_bits=32,
+    data_item_size_bits=32,
+    repeat_count=1,
+    vector_size=0,
+)
+
+# Context: include spectral metadata and set S-bit (header bit 24) for frequency data
+ctx_header = Header(
+    packet_type=PacketType.CONTEXT_PACKET,
+    class_id_present=False,
+    indicators_26=False,
+    indicators_25=False,
+    indicators_24=True,  # S-bit: frequency-domain Signal Spectral Data
+    tsi=TSI.UTC,
+    tsf=TSF.FRACTIONAL,
+    packet_count=0,
+    packet_size=0,
+)
+cif0 = CIF0Fields(
+    sample_rate_hz=500_000.0,
+    payload_format=payload_format,
+    data_packet_payload_format=payload_format.pack_words(),
+)
+ctx_pkt = ContextPacket(
+    header=ctx_header,
+    stream_id=stream_id,
+    integer_seconds=1_700_000_000,
+    fractional_seconds=0,
+    cif0=cif0,
+)
+ctx_bytes = ctx_pkt.to_bytes()
+
+# Data: mark S-bit in the data header to indicate spectral payload
+data_header = Header(
+    packet_type=PacketType.IF_DATA_WITH_STREAM_ID,
+    class_id_present=False,
+    indicators_26=False,
+    indicators_25=False,
+    indicators_24=True,  # S-bit: frequency-domain Signal Spectral Data
+    tsi=TSI.UTC,
+    tsf=TSF.FRACTIONAL,
+    packet_count=1,
+    packet_size=0,
+)
+spectral_bins = np.array([1.0, 0.5, 0.0, -0.25], dtype=">f4")  # I,Q pairs in frequency domain
+data_pkt = DataPacket(
+    header=data_header,
+    stream_id=stream_id,
+    integer_seconds=1_700_000_000,
+    fractional_seconds=0,
+    payload=spectral_bins.tobytes(),
+)
+data_bytes = data_pkt.to_bytes()
+```
+
 Notes
-- Data payload bytes must be 32‑bit aligned; the library pads to a word boundary as needed.
-- For numeric payloads, use big‑endian dtypes (e.g., `">f4"`, `">i2"`) to match VRT network byte order.
+- Data payload bytes must be 32-bit aligned; the library pads to a word boundary as needed.
+- For numeric payloads, use big-endian dtypes (e.g., `">f4"`, `">i2"`) to match VRT network byte order.
 - When you already have encoded bytes, set `payload` and omit `payload_format`.
 - When you want the library to encode/decode IQ, provide `payload_format` and set/use the `iq` field.
+- For frequency-domain Signal Spectral Data, set header bit 24 (`indicators_24=True`) or use `IQStreamWriter(frequency_domain=True)` to raise the S-bit per AV49.2 Rule 6.3.1-2.
 
 
 Read Packets From File
@@ -195,8 +269,10 @@ Examples
 --------
 
 - `examples/read_v49_file.py`: parse and print packets from a file
+- `examples/write_frequency_domain_v49.py`: synthesize spectral bins and write context + spectral data packets (S-bit set)
 - `examples/write_iq_stream_v49.py`: synthesize a tone and write IQ packets
 - `examples/waterfall_v49_file.py`: visualize spectrogram
+- `examples/waterfall_frequency_domain_v49.py`: read spectral packets (S-bit) and display a waterfall
 
 License
 -------
