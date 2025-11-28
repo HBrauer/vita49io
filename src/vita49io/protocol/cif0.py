@@ -21,7 +21,8 @@ Examples:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+import struct
+from typing import List, Optional, Tuple, Union
 from enum import IntEnum
 
 from .enums import TSI, TSF
@@ -32,7 +33,6 @@ from .utils import (
     _from_s64_fixed20,
     _from_u64_fixed20,
     _payload_bytes_to_words,
-    _payload_words_to_bytes,
     _to_s16_fixed7,
     _to_s64_fixed20,
     _to_u64_fixed20,
@@ -635,20 +635,10 @@ class CIF0Fields:
         return m
 
     def pack(self) -> bytes:
-        """Serialize the CIF0 fields into bytes beginning with the mask word.
-
-        Returns:
-            bytes: Serialized CIF0 payload including mask and encoded fields.
-
-        Examples:
-            >>> from vita49io.protocol.cif0 import CIF0Fields
-            >>> CIF0Fields().pack()[:4]
-            b"\x00\x00\x00\x00"
-        """
+        """Serialize the CIF0 fields into bytes beginning with the mask word."""
         words: List[int] = []
         words.append(self._presence_mask() & 0xFFFFFFFF)
 
-        # Emit fields in descending bit order, 31 -> 15
         if self.reference_point_identifier is not None:
             words.append(_u32(self.reference_point_identifier))
         if self.bandwidth_hz is not None:
@@ -685,7 +675,6 @@ class CIF0Fields:
         if self.timestamp_calibration_time_s is not None:
             words.append(_u32(self.timestamp_calibration_time_s))
         if self.temperature_c is not None:
-            # Store as signed 32-bit integer degrees Celsius
             words.append(_u32(self.temperature_c & 0xFFFFFFFF))
         if self.device_identifier is not None:
             oui, dev = self.device_identifier
@@ -713,15 +702,21 @@ class CIF0Fields:
         if self.context_association_lists is not None:
             words.extend(self.context_association_lists.pack_words())
 
-        return _payload_words_to_bytes(words)
+        out = bytearray(len(words) * 4)
+        for i, w in enumerate(words):
+            struct.pack_into(">I", out, i * 4, _u32(w))
+        return bytes(out)
 
     @staticmethod
-    def parse_from_mask(mask: int, field_words: List[int]) -> Tuple["CIF0Fields", int]:
+    def parse_from_mask(
+        mask: int,
+        field_words: Union[List[int], bytes, memoryview],
+    ) -> Tuple["CIF0Fields", int]:
         """Interpret CIF0 fields based on a mask word and payload words.
 
         Args:
             mask (int): CIF0 mask word indicating which fields are present.
-            field_words (List[int]): Subsequent 32-bit words holding encoded field data.
+            field_words (List[int] | bytes | memoryview): Subsequent 32-bit words holding encoded field data.
 
         Returns:
             Tuple[CIF0Fields, int]: Parsed fields and the number of words consumed.
@@ -734,14 +729,17 @@ class CIF0Fields:
             >>> CIF0Fields.parse_from_mask(0, [])[1]
             0
         """
-
-
+        if isinstance(field_words, list):
+            field_list = field_words
+        else:
+            mv = memoryview(field_words)
+            field_list = [w[0] for w in struct.iter_unpack(">I", mv.tobytes())]
 
         idx = 0
 
         def need(n: int) -> None:
             nonlocal idx
-            if idx + n > len(field_words):
+            if idx + n > len(field_list):
                 raise ValueError("Truncated CIF0 payload")
 
         f = CIF0Fields()
@@ -751,50 +749,50 @@ class CIF0Fields:
         f.raw_low_bits = mask & 0xFF
         if mask & (1 << 30):
             need(1)
-            f.reference_point_identifier = field_words[idx]
+            f.reference_point_identifier = field_list[idx]
             idx += 1
         if mask & (1 << 29):
             need(2)
-            f.bandwidth_hz = _from_s64_fixed20(field_words[idx], field_words[idx + 1])
+            f.bandwidth_hz = _from_s64_fixed20(field_list[idx], field_list[idx + 1])
             idx += 2
         if mask & (1 << 28):
             need(2)
-            f.if_reference_frequency_hz = _from_s64_fixed20(field_words[idx], field_words[idx + 1])
+            f.if_reference_frequency_hz = _from_s64_fixed20(field_list[idx], field_list[idx + 1])
             idx += 2
         if mask & (1 << 27):
             need(2)
-            f.rf_reference_frequency_hz = _from_s64_fixed20(field_words[idx], field_words[idx + 1])
+            f.rf_reference_frequency_hz = _from_s64_fixed20(field_list[idx], field_list[idx + 1])
             idx += 2
         if mask & (1 << 26):
             need(2)
-            f.rf_reference_frequency_offset_hz = _from_s64_fixed20(field_words[idx], field_words[idx + 1])
+            f.rf_reference_frequency_offset_hz = _from_s64_fixed20(field_list[idx], field_list[idx + 1])
             idx += 2
         if mask & (1 << 25):
             need(2)
-            f.if_band_offset_hz = _from_s64_fixed20(field_words[idx], field_words[idx + 1])
+            f.if_band_offset_hz = _from_s64_fixed20(field_list[idx], field_list[idx + 1])
             idx += 2
         if mask & (1 << 24):
             need(1)
-            f.reference_level_dbm = _from_s16_fixed7(field_words[idx] & 0xFFFF)
+            f.reference_level_dbm = _from_s16_fixed7(field_list[idx] & 0xFFFF)
             idx += 1
         if mask & (1 << 23):
             need(1)
-            w = field_words[idx]
+            w = field_list[idx]
             a = _from_s16_fixed7((w >> 16) & 0xFFFF)
             b = _from_s16_fixed7(w & 0xFFFF)
             f.gain_db = (a, b)
             idx += 1
         if mask & (1 << 22):
             need(1)
-            f.over_range_count = field_words[idx] & 0xFFFFFFFF
+            f.over_range_count = field_list[idx] & 0xFFFFFFFF
             idx += 1
         if mask & (1 << 21):
             need(2)
-            f.sample_rate_hz = _from_u64_fixed20(field_words[idx], field_words[idx + 1])
+            f.sample_rate_hz = _from_u64_fixed20(field_list[idx], field_list[idx + 1])
             idx += 2
         if mask & (1 << 20):
             need(2)
-            hi, lo = field_words[idx], field_words[idx + 1]
+            hi, lo = field_list[idx], field_list[idx + 1]
             i = ((hi & 0xFFFFFFFF) << 32) | (lo & 0xFFFFFFFF)
             if i & (1 << 63):
                 i -= 1 << 64
@@ -802,29 +800,29 @@ class CIF0Fields:
             idx += 2
         if mask & (1 << 19):
             need(1)
-            f.timestamp_calibration_time_s = field_words[idx] & 0xFFFFFFFF
+            f.timestamp_calibration_time_s = field_list[idx] & 0xFFFFFFFF
             idx += 1
         if mask & (1 << 18):
             need(1)
-            w = field_words[idx]
+            w = field_list[idx]
             if w & 0x80000000:
                 w = (w - 0x100000000)  # s32
             f.temperature_c = w
             idx += 1
         if mask & (1 << 17):
             need(2)
-            oui = field_words[idx] & 0xFFFFFF
-            dev = field_words[idx + 1] & 0xFFFFFFFF
+            oui = field_list[idx] & 0xFFFFFF
+            dev = field_list[idx + 1] & 0xFFFFFFFF
             f.device_identifier = (oui, dev)
             idx += 2
         if mask & (1 << 16):
             need(1)
-            f.state_event_indicators = field_words[idx] & 0xFFFFFFFF
+            f.state_event_indicators = field_list[idx] & 0xFFFFFFFF
             idx += 1
         if mask & (1 << 15):
             need(2)
-            w0 = field_words[idx] & 0xFFFFFFFF
-            w1 = field_words[idx + 1] & 0xFFFFFFFF
+            w0 = field_list[idx] & 0xFFFFFFFF
+            w1 = field_list[idx + 1] & 0xFFFFFFFF
             f.data_packet_payload_format = (w0, w1)
             # Also provide a decoded, user-friendly view
             try:
@@ -834,44 +832,44 @@ class CIF0Fields:
             idx += 2
         if mask & (1 << 14):
             need(FormattedGeolocation.NUM_WORDS)
-            segment = field_words[idx : idx + FormattedGeolocation.NUM_WORDS]
+            segment = field_list[idx : idx + FormattedGeolocation.NUM_WORDS]
             f.formatted_gps_geolocation = FormattedGeolocation.parse(segment)
             idx += FormattedGeolocation.NUM_WORDS
         if mask & (1 << 13):
             need(FormattedGeolocation.NUM_WORDS)
-            segment = field_words[idx : idx + FormattedGeolocation.NUM_WORDS]
+            segment = field_list[idx : idx + FormattedGeolocation.NUM_WORDS]
             f.formatted_ins_geolocation = FormattedGeolocation.parse(segment)
             idx += FormattedGeolocation.NUM_WORDS
         if mask & (1 << 12):
             need(Ephemeris.NUM_WORDS)
-            segment = field_words[idx : idx + Ephemeris.NUM_WORDS]
+            segment = field_list[idx : idx + Ephemeris.NUM_WORDS]
             f.ecef_ephemeris = Ephemeris.parse(segment)
             idx += Ephemeris.NUM_WORDS
         if mask & (1 << 11):
             need(Ephemeris.NUM_WORDS)
-            segment = field_words[idx : idx + Ephemeris.NUM_WORDS]
+            segment = field_list[idx : idx + Ephemeris.NUM_WORDS]
             f.relative_ephemeris = Ephemeris.parse(segment)
             idx += Ephemeris.NUM_WORDS
         if mask & (1 << 10):
             need(1)
-            f.ephemeris_reference_identifier = field_words[idx] & 0xFFFFFFFF
+            f.ephemeris_reference_identifier = field_list[idx] & 0xFFFFFFFF
             idx += 1
         if mask & (1 << 9):
             # Need two header words to learn payload length
             need(2)
-            remaining = field_words[idx:]
+            remaining = field_list[idx:]
             gps_ascii, consumed = GPSASCIIField.parse(remaining)
             f.gps_ascii = gps_ascii
             idx += consumed
         if mask & (1 << 8):
-            remaining = field_words[idx:]
+            remaining = field_list[idx:]
             cal, consumed = ContextAssociationLists.parse(remaining)
             f.context_association_lists = cal
             idx += consumed
         return f, idx
 
     @staticmethod
-    def parse(payload: bytes) -> Tuple["CIF0Fields", int]:
+    def parse(payload: Union[bytes, memoryview]) -> Tuple["CIF0Fields", int]:
         """Parse a CIF0 payload from bytes and report the number of bytes consumed.
 
         Args:
@@ -891,12 +889,12 @@ class CIF0Fields:
             >>> CIF0Fields.parse(b"\x00\x00\x00\x00")[1]
             4
         """
-        words = _payload_bytes_to_words(payload)
-        if not words:
+        mv = memoryview(payload)
+        if len(mv) < 4:
             raise ValueError("Empty payload for CIF0")
+        words = [w[0] for w in struct.iter_unpack(">I", mv.tobytes())]
         mask = words[0]
         f, used_field_words = CIF0Fields.parse_from_mask(mask, words[1:])
-        # Return bytes consumed including the mask word
         return f, (1 + used_field_words) * 4
 
 
