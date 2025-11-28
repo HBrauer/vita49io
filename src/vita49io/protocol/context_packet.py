@@ -217,9 +217,9 @@ class ContextPacket(LazyBinary):
                 extra_masks.append((i, WORD.unpack_from(payload, pos)[0]))
                 pos += 4
         remaining = payload[pos:]
-        remaining_words = [w[0] for w in struct.iter_unpack(">I", remaining)]
-        cif0, used_cif0_words = CIF0Fields.parse_from_mask(cif0_mask, remaining_words)
-        raw_cif_fields = remaining_words[used_cif0_words:]
+        cif0, used_cif0_words = CIF0Fields.parse_from_mask(cif0_mask, remaining)
+        remaining_after_cif0 = remaining[used_cif0_words * 4 :]
+        raw_cif_fields = [w[0] for w in struct.iter_unpack(">I", remaining_after_cif0)]
 
         self._cif0 = cif0
         self._cif_extra_masks = extra_masks or None
