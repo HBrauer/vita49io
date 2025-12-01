@@ -763,23 +763,28 @@ class CIF0Fields:
             idx += 1
         if mask & (1 << 29):
             need(2)
-            f.bandwidth_hz = _from_s64_fixed20(word_at(0), word_at(1))
+            hi, lo = struct.unpack_from(">II", mv, idx * 4)
+            f.bandwidth_hz = _from_s64_fixed20(hi, lo)
             idx += 2
         if mask & (1 << 28):
             need(2)
-            f.if_reference_frequency_hz = _from_s64_fixed20(word_at(0), word_at(1))
+            hi, lo = struct.unpack_from(">II", mv, idx * 4)
+            f.if_reference_frequency_hz = _from_s64_fixed20(hi, lo)
             idx += 2
         if mask & (1 << 27):
             need(2)
-            f.rf_reference_frequency_hz = _from_s64_fixed20(word_at(0), word_at(1))
+            hi, lo = struct.unpack_from(">II", mv, idx * 4)
+            f.rf_reference_frequency_hz = _from_s64_fixed20(hi, lo)
             idx += 2
         if mask & (1 << 26):
             need(2)
-            f.rf_reference_frequency_offset_hz = _from_s64_fixed20(word_at(0), word_at(1))
+            hi, lo = struct.unpack_from(">II", mv, idx * 4)
+            f.rf_reference_frequency_offset_hz = _from_s64_fixed20(hi, lo)
             idx += 2
         if mask & (1 << 25):
             need(2)
-            f.if_band_offset_hz = _from_s64_fixed20(word_at(0), word_at(1))
+            hi, lo = struct.unpack_from(">II", mv, idx * 4)
+            f.if_band_offset_hz = _from_s64_fixed20(hi, lo)
             idx += 2
         if mask & (1 << 24):
             need(1)
@@ -798,11 +803,12 @@ class CIF0Fields:
             idx += 1
         if mask & (1 << 21):
             need(2)
-            f.sample_rate_hz = _from_u64_fixed20(word_at(0), word_at(1))
+            hi, lo = struct.unpack_from(">II", mv, idx * 4)
+            f.sample_rate_hz = _from_u64_fixed20(hi, lo)
             idx += 2
         if mask & (1 << 20):
             need(2)
-            hi, lo = word_at(0), word_at(1)
+            hi, lo = struct.unpack_from(">II", mv, idx * 4)
             i = (hi << 32) | lo
             if i & (1 << 63):
                 i -= 1 << 64
@@ -821,8 +827,8 @@ class CIF0Fields:
             idx += 1
         if mask & (1 << 17):
             need(2)
-            oui = word_at(0) & 0xFFFFFF
-            dev = word_at(1)
+            oui, dev = struct.unpack_from(">II", mv, idx * 4)
+            oui &= 0xFFFFFF
             f.device_identifier = (oui, dev)
             idx += 2
         if mask & (1 << 16):
@@ -831,8 +837,7 @@ class CIF0Fields:
             idx += 1
         if mask & (1 << 15):
             need(2)
-            w0 = word_at(0)
-            w1 = word_at(1)
+            w0, w1 = struct.unpack_from(">II", mv, idx * 4)
             f.data_packet_payload_format = (w0, w1)
             # Also provide a decoded, user-friendly view
             try:
