@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import struct
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Sequence, Tuple, Union
 from enum import IntEnum
 
 from .enums import TSI, TSF
@@ -286,7 +286,7 @@ class FormattedGeolocation:
         ]
 
     @staticmethod
-    def parse(words: List[int]) -> "FormattedGeolocation":
+    def parse(words: Sequence[int]) -> "FormattedGeolocation":
         if len(words) < FormattedGeolocation.NUM_WORDS:
             raise ValueError("Truncated FormattedGeolocation field")
         w0 = words[0]
@@ -358,7 +358,7 @@ class Ephemeris:
         ]
 
     @staticmethod
-    def parse(words: List[int]) -> "Ephemeris":
+    def parse(words: Sequence[int]) -> "Ephemeris":
         if len(words) < Ephemeris.NUM_WORDS:
             raise ValueError("Truncated Ephemeris field")
         w0 = words[0]
@@ -734,23 +734,8 @@ class CIF0Fields:
             mv = mv.cast("B")
         if len(mv) % 4 != 0:
             raise ValueError("CIF0 payload must be a whole number of 32-bit words")
-        word_count = len(mv) // 4
 
-        idx = 0  # word index into mv
-
-        def need(n: int) -> None:
-            if idx + n > word_count:
-                raise ValueError("Truncated CIF0 payload")
-
-        def word_at(offset: int) -> int:
-            return struct.unpack_from(">I", mv, (idx + offset) * 4)[0]
-
-        def take_words(n: int) -> List[int]:
-            nonlocal idx
-            need(n)
-            words = [struct.unpack_from(">I", mv, (idx + i) * 4)[0] for i in range(n)]
-            idx += n
-            return words
+        idx = 0  # byte index into mv
 
         f = CIF0Fields()
 
@@ -758,126 +743,109 @@ class CIF0Fields:
         # Save raw low bits 14..0
         f.raw_low_bits = mask & 0xFF
         if mask & (1 << 30):
-            need(1)
-            f.reference_point_identifier = word_at(0)
-            idx += 1
+            f.reference_point_identifier = struct.unpack_from(">I", mv, idx)[0]
+            idx += 4
         if mask & (1 << 29):
-            need(2)
-            hi, lo = struct.unpack_from(">II", mv, idx * 4)
+            hi, lo = struct.unpack_from(">II", mv, idx)
             f.bandwidth_hz = _from_s64_fixed20(hi, lo)
-            idx += 2
+            idx += 8
         if mask & (1 << 28):
-            need(2)
-            hi, lo = struct.unpack_from(">II", mv, idx * 4)
+            hi, lo = struct.unpack_from(">II", mv, idx)
             f.if_reference_frequency_hz = _from_s64_fixed20(hi, lo)
-            idx += 2
+            idx += 8
         if mask & (1 << 27):
-            need(2)
-            hi, lo = struct.unpack_from(">II", mv, idx * 4)
+            hi, lo = struct.unpack_from(">II", mv, idx)
             f.rf_reference_frequency_hz = _from_s64_fixed20(hi, lo)
-            idx += 2
+            idx += 8
         if mask & (1 << 26):
-            need(2)
-            hi, lo = struct.unpack_from(">II", mv, idx * 4)
+            hi, lo = struct.unpack_from(">II", mv, idx)
             f.rf_reference_frequency_offset_hz = _from_s64_fixed20(hi, lo)
-            idx += 2
+            idx += 8
         if mask & (1 << 25):
-            need(2)
-            hi, lo = struct.unpack_from(">II", mv, idx * 4)
+            hi, lo = struct.unpack_from(">II", mv, idx)
             f.if_band_offset_hz = _from_s64_fixed20(hi, lo)
-            idx += 2
+            idx += 8
         if mask & (1 << 24):
-            need(1)
-            f.reference_level_dbm = _from_s16_fixed7(word_at(0) & 0xFFFF)
-            idx += 1
+            w = struct.unpack_from(">I", mv, idx)[0]
+            f.reference_level_dbm = _from_s16_fixed7(w & 0xFFFF)
+            idx += 4
         if mask & (1 << 23):
-            need(1)
-            w = word_at(0)
+            w = struct.unpack_from(">I", mv, idx)[0]
             a = _from_s16_fixed7((w >> 16) & 0xFFFF)
             b = _from_s16_fixed7(w & 0xFFFF)
             f.gain_db = (a, b)
-            idx += 1
+            idx += 4
         if mask & (1 << 22):
-            need(1)
-            f.over_range_count = word_at(0)
-            idx += 1
+            f.over_range_count = struct.unpack_from(">I", mv, idx)[0]
+            idx += 4
         if mask & (1 << 21):
-            need(2)
-            hi, lo = struct.unpack_from(">II", mv, idx * 4)
+            hi, lo = struct.unpack_from(">II", mv, idx)
             f.sample_rate_hz = _from_u64_fixed20(hi, lo)
-            idx += 2
+            idx += 8
         if mask & (1 << 20):
-            need(2)
-            hi, lo = struct.unpack_from(">II", mv, idx * 4)
+            hi, lo = struct.unpack_from(">II", mv, idx)
             i = (hi << 32) | lo
             if i & (1 << 63):
                 i -= 1 << 64
             f.timestamp_adjustment_fs = i
-            idx += 2
+            idx += 8
         if mask & (1 << 19):
-            need(1)
-            f.timestamp_calibration_time_s = word_at(0)
-            idx += 1
+            f.timestamp_calibration_time_s = struct.unpack_from(">I", mv, idx)[0]
+            idx += 4
         if mask & (1 << 18):
-            need(1)
-            w = word_at(0)
+            w = struct.unpack_from(">I", mv, idx)[0]
             if w & 0x80000000:
                 w = (w - 0x100000000)  # s32
             f.temperature_c = w
-            idx += 1
+            idx += 4
         if mask & (1 << 17):
-            need(2)
-            oui, dev = struct.unpack_from(">II", mv, idx * 4)
+            oui, dev = struct.unpack_from(">II", mv, idx)
             oui &= 0xFFFFFF
             f.device_identifier = (oui, dev)
-            idx += 2
+            idx += 8
         if mask & (1 << 16):
-            need(1)
-            f.state_event_indicators = word_at(0)
-            idx += 1
+            f.state_event_indicators = struct.unpack_from(">I", mv, idx)[0]
+            idx += 4
         if mask & (1 << 15):
-            need(2)
-            w0, w1 = struct.unpack_from(">II", mv, idx * 4)
+            w0, w1 = struct.unpack_from(">II", mv, idx)
             f.data_packet_payload_format = (w0, w1)
             # Also provide a decoded, user-friendly view
             try:
                 f.payload_format = PayloadFormat.parse(w0, w1)
             except Exception:
                 f.payload_format = None
-            idx += 2
+            idx += 8
         if mask & (1 << 14):
-            segment = take_words(FormattedGeolocation.NUM_WORDS)
+            segment = struct.unpack_from(f">{FormattedGeolocation.NUM_WORDS}I", mv, idx)
             f.formatted_gps_geolocation = FormattedGeolocation.parse(segment)
+            idx += FormattedGeolocation.NUM_WORDS * 4
         if mask & (1 << 13):
-            segment = take_words(FormattedGeolocation.NUM_WORDS)
+            segment = struct.unpack_from(f">{FormattedGeolocation.NUM_WORDS}I", mv, idx)
             f.formatted_ins_geolocation = FormattedGeolocation.parse(segment)
+            idx += FormattedGeolocation.NUM_WORDS * 4
         if mask & (1 << 12):
-            segment = take_words(Ephemeris.NUM_WORDS)
+            segment = struct.unpack_from(f">{Ephemeris.NUM_WORDS}I", mv, idx)
             f.ecef_ephemeris = Ephemeris.parse(segment)
+            idx += Ephemeris.NUM_WORDS * 4
         if mask & (1 << 11):
-            segment = take_words(Ephemeris.NUM_WORDS)
+            segment = struct.unpack_from(f">{Ephemeris.NUM_WORDS}I", mv, idx)
             f.relative_ephemeris = Ephemeris.parse(segment)
+            idx += Ephemeris.NUM_WORDS * 4
         if mask & (1 << 10):
-            need(1)
-            f.ephemeris_reference_identifier = word_at(0)
-            idx += 1
+            f.ephemeris_reference_identifier = struct.unpack_from(">I", mv, idx)[0]
+            idx += 4
         if mask & (1 << 9):
             # Need two header words to learn payload length
-            need(2)
-            remaining_words = [
-                struct.unpack_from(">I", mv, (idx + i) * 4)[0] for i in range(word_count - idx)
-            ]
+            remaining_words = [struct.unpack_from(">I", mv, offset)[0] for offset in range(idx, len(mv), 4)]
             gps_ascii, consumed = GPSASCIIField.parse(remaining_words)
             f.gps_ascii = gps_ascii
-            idx += consumed
+            idx += consumed * 4
         if mask & (1 << 8):
-            remaining_words = [
-                struct.unpack_from(">I", mv, (idx + i) * 4)[0] for i in range(word_count - idx)
-            ]
+            remaining_words = [struct.unpack_from(">I", mv, offset)[0] for offset in range(idx, len(mv), 4)]
             cal, consumed = ContextAssociationLists.parse(remaining_words)
             f.context_association_lists = cal
-            idx += consumed
-        return f, idx
+            idx += consumed * 4
+        return f, idx // 4
 
     @staticmethod
     def parse(payload: Union[bytes, memoryview]) -> Tuple["CIF0Fields", int]:
