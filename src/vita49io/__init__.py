@@ -29,6 +29,7 @@ from .protocol.cif1 import (
     SpectrumType,
     WindowTimeDeltaInterpretation,
 )
+from .protocol.cif2 import CIF2Fields
 
 __all__ = [
     "DataPacket",
@@ -52,5 +53,6 @@ __all__ = [
     "SpectrumType",
     "AveragingType",
     "WindowTimeDeltaInterpretation",
+    "CIF2Fields",
 ]
 

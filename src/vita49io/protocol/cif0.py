@@ -26,6 +26,7 @@ from typing import List, Sequence, Tuple, Union
 from enum import IntEnum, IntFlag
 
 from .cif1 import CIF1Fields
+from .cif2 import CIF2Fields
 from .enums import TSI, TSF
 from .utils import (
     _decode_fixed_point,
@@ -610,6 +611,8 @@ class CIF0Fields:
     context_association_lists: "ContextAssociationLists | None" = None
     # Bit 1 (CIF1 mask + payload)
     cif1: CIF1Fields | None = None
+    # Bit 2 (CIF2 mask + payload)
+    cif2: CIF2Fields | None = None
     # Internal caches to preserve original payload words on roundtrip
     _raw_rf_reference_frequency_words: Tuple[int, int] | None = field(default=None, repr=False, init=False)
     _parsed_rf_reference_frequency_hz: float | None = field(default=None, repr=False, init=False)
@@ -670,6 +673,8 @@ class CIF0Fields:
             mask |= CIF0Flags.CONTEXT_ASSOCIATION_LISTS
         if self.cif1 is not None:
             mask |= CIF0Flags.CIF1_ENABLE
+        if self.cif2 is not None:
+            mask |= CIF0Flags.CIF2_ENABLE
         return int(mask)
 
     def pack(self) -> bytes:
@@ -758,6 +763,9 @@ class CIF0Fields:
         if self.cif1 is not None:
             words.append(_u32(self.cif1._presence_mask()))
             words.extend(_payload_bytes_to_words(self.cif1.pack()))
+        if self.cif2 is not None:
+            words.append(_u32(self.cif2._presence_mask()))
+            words.extend(_payload_bytes_to_words(self.cif2.pack()))
 
         out = bytearray(len(words) * 4)
         for i, w in enumerate(words):
@@ -918,6 +926,14 @@ class CIF0Fields:
             cif1_fields, cif1_used_words = CIF1Fields.parse_from_mask(cif1_mask, mv[idx:])
             f.cif1 = cif1_fields
             idx += cif1_used_words * 4
+        if flags & CIF0Flags.CIF2_ENABLE:
+            if idx + 4 > len(mv):
+                raise ValueError("Truncated CIF2 mask")
+            cif2_mask = struct.unpack_from(">I", mv, idx)[0]
+            idx += 4
+            cif2_fields, cif2_used_words = CIF2Fields.parse_from_mask(cif2_mask, mv[idx:])
+            f.cif2 = cif2_fields
+            idx += cif2_used_words * 4
         return f, idx // 4
 
     @staticmethod
