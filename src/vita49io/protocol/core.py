@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import struct
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Tuple
 
 from .enums import PacketType, TSI, TSF
 from .utils import (
@@ -235,10 +235,10 @@ class Header:
 @dataclass
 class _Common:
     header: Header
-    stream_id: Optional[int]
-    class_id: Optional[ClassID]
-    integer_seconds: Optional[int]
-    fractional_seconds: Optional[int]
+    stream_id: int | None
+    class_id: ClassID | None
+    integer_seconds: int | None
+    fractional_seconds: int | None
 
 
 def _pack_common_prefix(c: _Common) -> List[int]:
@@ -310,10 +310,10 @@ def _parse_common_from_words(words: List[int]) -> tuple[_Common, int, int]:
         raise ValueError("Packet size mismatch")
 
     idx = 1
-    stream_id: Optional[int] = None
-    class_id: Optional[ClassID] = None
-    integer_seconds: Optional[int] = None
-    fractional_seconds: Optional[int] = None
+    stream_id: int | None = None
+    class_id: ClassID | None = None
+    integer_seconds: int | None = None
+    fractional_seconds: int | None = None
 
     # Stream ID presence is determined by packet type (with/without) in this model
     if pkt_type in (
@@ -376,10 +376,10 @@ def _parse_common_from_bytes(data: memoryview) -> Tuple[_Common, int, int]:
         raise ValueError("Packet size mismatch")
 
     idx = 4
-    stream_id: Optional[int] = None
-    class_id: Optional[ClassID] = None
-    integer_seconds: Optional[int] = None
-    fractional_seconds: Optional[int] = None
+    stream_id: int | None = None
+    class_id: ClassID | None = None
+    integer_seconds: int | None = None
+    fractional_seconds: int | None = None
 
     if hdr.packet_type in (
         PacketType.IF_DATA_WITH_STREAM_ID,

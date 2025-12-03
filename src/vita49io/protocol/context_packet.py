@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import struct
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 from .cif0 import CIF0Fields
 from .core import (
@@ -50,16 +50,16 @@ class ContextPacket(LazyBinary):
     def __init__(
         self,
         *,
-        header: Optional[Header] = None,
-        packet_type: Optional[PacketType] = None,
+        header: Header | None = None,
+        packet_type: PacketType | None = None,
         tsi: TSI = TSI.NONE,
         tsf: TSF = TSF.NONE,
         packet_count: int = 0,
-        stream_id: Optional[int] = None,
-        class_id: Optional[ClassID] = None,
-        integer_seconds: Optional[int] = None,
-        fractional_seconds: Optional[int] = None,
-        cif0: Optional[CIF0Fields] = None,
+        stream_id: int | None = None,
+        class_id: ClassID | None = None,
+        integer_seconds: int | None = None,
+        fractional_seconds: int | None = None,
+        cif0: CIF0Fields | None = None,
         # If true, set header.indicators_25 (V49.2-only packet)
         requiresVita49_2: bool = False,
         # If true, set header.indicators_24 (Timestamp Mode bit / TSM)
@@ -127,50 +127,50 @@ class ContextPacket(LazyBinary):
         self._mark_dirty()
 
     @property
-    def stream_id(self) -> Optional[int]:
+    def stream_id(self) -> int | None:
         if self._stream_id is None and self._mv is not None:
             common, _, _ = self._common_info()
             self._stream_id = common.stream_id
         return self._stream_id
 
     @stream_id.setter
-    def stream_id(self, value: Optional[int]) -> None:
+    def stream_id(self, value: int | None) -> None:
         self._stream_id = value
         self._mark_dirty()
 
     @property
-    def class_id(self) -> Optional[ClassID]:
+    def class_id(self) -> ClassID | None:
         if self._class_id is None and self._mv is not None:
             common, _, _ = self._common_info()
             self._class_id = common.class_id
         return self._class_id
 
     @class_id.setter
-    def class_id(self, value: Optional[ClassID]) -> None:
+    def class_id(self, value: ClassID | None) -> None:
         self._class_id = value
         self._mark_dirty()
 
     @property
-    def integer_seconds(self) -> Optional[int]:
+    def integer_seconds(self) -> int | None:
         if self._integer_seconds is None and self._mv is not None:
             common, _, _ = self._common_info()
             self._integer_seconds = common.integer_seconds
         return self._integer_seconds
 
     @integer_seconds.setter
-    def integer_seconds(self, value: Optional[int]) -> None:
+    def integer_seconds(self, value: int | None) -> None:
         self._integer_seconds = value
         self._mark_dirty()
 
     @property
-    def fractional_seconds(self) -> Optional[int]:
+    def fractional_seconds(self) -> int | None:
         if self._fractional_seconds is None and self._mv is not None:
             common, _, _ = self._common_info()
             self._fractional_seconds = common.fractional_seconds
         return self._fractional_seconds
 
     @fractional_seconds.setter
-    def fractional_seconds(self, value: Optional[int]) -> None:
+    def fractional_seconds(self, value: int | None) -> None:
         self._fractional_seconds = value
         self._mark_dirty()
 

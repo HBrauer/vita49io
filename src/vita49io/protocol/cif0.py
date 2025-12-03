@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import struct
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import List, Sequence, Tuple, Union
 from enum import IntEnum, IntFlag
 
 from .cif1 import CIF1Fields
@@ -172,7 +172,7 @@ class PayloadFormat:
     # Word 2 fields
     repeat_count: int  # decoded (1..65536)
     vector_size: int  # decoded (1..65536)
-    data_item_format: Optional["DataItemFormat"] = None
+    data_item_format: "DataItemFormat | None" = None
 
     @staticmethod
     def parse(w0: int, w1: int) -> "PayloadFormat":
@@ -465,7 +465,7 @@ class ContextAssociationLists:
     system_list: List[int]
     vector_component_list: List[int]
     async_channel_list: List[int]
-    async_channel_tags: Optional[List[int]] = None
+    async_channel_tags: List[int] | None = None
 
     def pack_words(self) -> List[int]:
         src_size = len(self.source_list)
@@ -517,7 +517,7 @@ class ContextAssociationLists:
         system_list = take(sys_size)
         vector_component_list = take(vec_size)
         async_channel_list = take(async_size)
-        async_tags: Optional[List[int]] = None
+        async_tags: List[int] | None = None
         if async_has_tags:
             async_tags = take(async_size)
 
@@ -563,60 +563,60 @@ class CIF0Fields:
     # Bit 31
     context_field_change_indicator: bool = False  
     # Bit 30
-    reference_point_identifier: Optional[int] = None  # 32-bit SID
+    reference_point_identifier: int | None = None  # 32-bit SID
     # Bits 29..25 (2 words each, s64 fp20)
-    bandwidth_hz: Optional[float] = None
-    if_reference_frequency_hz: Optional[float] = None
-    rf_reference_frequency_hz: Optional[float] = None
-    rf_reference_frequency_offset_hz: Optional[float] = None
-    if_band_offset_hz: Optional[float] = None
+    bandwidth_hz: float | None = None
+    if_reference_frequency_hz: float | None = None
+    rf_reference_frequency_hz: float | None = None
+    rf_reference_frequency_offset_hz: float | None = None
+    if_band_offset_hz: float | None = None
     # Bit 24 (1 word, s16 fp7 in low 16 bits)
-    reference_level_dbm: Optional[float] = None
+    reference_level_dbm: float | None = None
     # Bit 23 (1 word, two s16 fp7)
-    gain_db: Optional[Tuple[float, float]] = None  # (stage1, stage2)
+    gain_db: Tuple[float, float] | None = None  # (stage1, stage2)
     # Bit 22 (1 word u32)
-    over_range_count: Optional[int] = None
+    over_range_count: int | None = None
     # Bit 21 (2 words u64 fp20)
-    sample_rate_hz: Optional[float] = None
+    sample_rate_hz: float | None = None
     # Bit 20 (2 words s64, LSB=1 fs)
-    timestamp_adjustment_fs: Optional[int] = None
+    timestamp_adjustment_fs: int | None = None
     # Bit 19 (1 word u32)
-    timestamp_calibration_time_s: Optional[int] = None
+    timestamp_calibration_time_s: int | None = None
     # Bit 18 (1 word s32 Celsius)
-    temperature_c: Optional[int] = None
+    temperature_c: int | None = None
     # Bit 17 (2 words)
-    device_identifier: Optional[Tuple[int, int]] = None  # (OUI 24-bit, device 32-bit)
+    device_identifier: Tuple[int, int] | None = None  # (OUI 24-bit, device 32-bit)
     # Bit 16 (1 word u32)
-    state_event_indicators: Optional[int] = None
+    state_event_indicators: int | None = None
     # Bit 15 (2 words payload format)
-    data_packet_payload_format: Optional[Tuple[int, int]] = None
+    data_packet_payload_format: Tuple[int, int] | None = None
     # Decoded helper (not part of on-wire format). If provided when packing
     # and raw tuple is None, it will be used to generate the two words.
-    payload_format: Optional[PayloadFormat] = None
+    payload_format: PayloadFormat | None = None
 
     # Bit 14 (multi-word formatted GPS geolocation)
-    formatted_gps_geolocation: Optional["FormattedGeolocation"] = None
+    formatted_gps_geolocation: "FormattedGeolocation | None" = None
     # Bit 13 (multi-word formatted INS geolocation)
-    formatted_ins_geolocation: Optional["FormattedGeolocation"] = None
+    formatted_ins_geolocation: "FormattedGeolocation | None" = None
     # Bit 12 (multi-word ECEF ephemeris)
-    ecef_ephemeris: Optional["Ephemeris"] = None
+    ecef_ephemeris: "Ephemeris | None" = None
     # Bit 11 (multi-word Relative ephemeris)
-    relative_ephemeris: Optional["Ephemeris"] = None
+    relative_ephemeris: "Ephemeris | None" = None
     # Bit 10 (single-word ephemeris reference identifier)
-    ephemeris_reference_identifier: Optional[int] = None
+    ephemeris_reference_identifier: int | None = None
     # Bit 9 (variable-length GPS ASCII field)
-    gps_ascii: Optional["GPSASCIIField"] = None
+    gps_ascii: "GPSASCIIField | None" = None
     # Bit 8 (variable-length Context Association Lists section)
-    context_association_lists: Optional["ContextAssociationLists"] = None
+    context_association_lists: "ContextAssociationLists | None" = None
     # Bit 1 (CIF1 mask + payload)
-    cif1: Optional[CIF1Fields] = None
+    cif1: CIF1Fields | None = None
     # Internal caches to preserve original payload words on roundtrip
-    _raw_rf_reference_frequency_words: Optional[Tuple[int, int]] = field(default=None, repr=False, init=False)
-    _parsed_rf_reference_frequency_hz: Optional[float] = field(default=None, repr=False, init=False)
-    _raw_reference_level_word: Optional[int] = field(default=None, repr=False, init=False)
-    _parsed_reference_level_dbm: Optional[float] = field(default=None, repr=False, init=False)
-    _raw_device_identifier_words: Optional[Tuple[int, int]] = field(default=None, repr=False, init=False)
-    _parsed_device_identifier: Optional[Tuple[int, int]] = field(default=None, repr=False, init=False)
+    _raw_rf_reference_frequency_words: Tuple[int, int] | None = field(default=None, repr=False, init=False)
+    _parsed_rf_reference_frequency_hz: float | None = field(default=None, repr=False, init=False)
+    _raw_reference_level_word: int | None = field(default=None, repr=False, init=False)
+    _parsed_reference_level_dbm: float | None = field(default=None, repr=False, init=False)
+    _raw_device_identifier_words: Tuple[int, int] | None = field(default=None, repr=False, init=False)
+    _parsed_device_identifier: Tuple[int, int] | None = field(default=None, repr=False, init=False)
 
     def _presence_mask(self) -> int:
         mask = CIF0Flags.NONE

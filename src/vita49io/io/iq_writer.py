@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional, Tuple, Union
+from typing import Tuple, Union
 
 import numpy as np
 
@@ -111,7 +111,7 @@ class IQStreamWriter:
     sample_rate_hz: float
 
     # Payload format config (either provide ready pf or define via fields)
-    payload_format: Optional[PayloadFormat] = None
+    payload_format: PayloadFormat | None = None
     data_item_format: DataItemFormat = DataItemFormat.IEEE754_SINGLE
     item_packing_field_size_bits: int = 32
     data_item_size_bits: int = 32
@@ -123,24 +123,24 @@ class IQStreamWriter:
     packet_type: PacketType = PacketType.IF_DATA_WITH_STREAM_ID
     tsi: TSI = TSI.UTC
     tsf: TSF = TSF.FRACTIONAL
-    class_id: Optional[ClassID] = None
+    class_id: ClassID | None = None
     requires_vita49_2: bool = False
     frequency_domain: bool = False
 
     # Initial wall-clock start time (epoch seconds). If None, uses now (UTC).
-    start_time_epoch_s: Optional[float] = None
+    start_time_epoch_s: float | None = None
 
     # Optional context metadata (CIF0)
-    bandwidth_hz: Optional[float] = None
-    if_reference_frequency_hz: Optional[float] = None
-    rf_reference_frequency_hz: Optional[float] = None
-    rf_reference_frequency_offset_hz: Optional[float] = None
-    if_band_offset_hz: Optional[float] = None
-    reference_level_dbm: Optional[float] = None
+    bandwidth_hz: float | None = None
+    if_reference_frequency_hz: float | None = None
+    rf_reference_frequency_hz: float | None = None
+    rf_reference_frequency_offset_hz: float | None = None
+    if_band_offset_hz: float | None = None
+    reference_level_dbm: float | None = None
     normalize_iq_to_reference_level: bool = False
-    gain_db: Optional[Tuple[float, float]] = None
-    device_identifier: Optional[Tuple[int, int]] = None  # (OUI 24-bit, device 32-bit)
-    state_event_indicators: Optional[int] = None
+    gain_db: Tuple[float, float] | None = None
+    device_identifier: Tuple[int, int] | None = None  # (OUI 24-bit, device 32-bit)
+    state_event_indicators: int | None = None
 
     # Context packet timestamp mode (CIF Timestamp Mode / TSM bit via indicators_24)
     context_timestamp_mode_general: bool = False
@@ -386,7 +386,7 @@ class IQStreamWriter:
 
     # ---------- Utilities ----------
 
-    def reset_time(self, start_time: Optional[Union[float, datetime]] = None) -> None:
+    def reset_time(self, start_time: Union[float, datetime, None] = None) -> None:
         """Reset the timestamp cursor to a specific starting time.
 
         Args:

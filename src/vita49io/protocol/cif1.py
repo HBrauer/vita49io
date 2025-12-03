@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import struct
 from enum import IntEnum, IntFlag
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import List, Sequence, Tuple, Union
 
 from .utils import _from_s16_fixed7, _from_s64_fixed20, _to_s16_fixed7, _to_s64_fixed20, _u32
 
@@ -196,16 +196,16 @@ class SectorStepRecord:
 
     sector_number: int
     f1_start_frequency_hz: float
-    f2_stop_frequency_hz: Optional[float] = None
-    resolution_bandwidth_hz: Optional[float] = None
-    tune_step_size_hz: Optional[float] = None
-    number_of_points: Optional[int] = None
-    default_gain_db: Optional[Tuple[float, float]] = None
-    threshold_db: Optional[Tuple[float, float]] = None
-    dwell_time_fs: Optional[int] = None
-    start_time_fs: Optional[int] = None
-    time3_fs: Optional[int] = None
-    time4_fs: Optional[int] = None
+    f2_stop_frequency_hz: float | None = None
+    resolution_bandwidth_hz: float | None = None
+    tune_step_size_hz: float | None = None
+    number_of_points: int | None = None
+    default_gain_db: Tuple[float, float] | None = None
+    threshold_db: Tuple[float, float] | None = None
+    dwell_time_fs: int | None = None
+    start_time_fs: int | None = None
+    time3_fs: int | None = None
+    time4_fs: int | None = None
 
 
 def _sector_indicator_for_record(rec: SectorStepRecord) -> int:
@@ -645,42 +645,42 @@ class CIF1Fields:
     """Represent the CIF1 fields."""
 
     # Bit 31
-    phase_radians: Optional[float] = None
+    phase_radians: float | None = None
     # Bit 20
-    eb_no_and_ber_db: Optional[Tuple[float, float]] = None  # (Eb/No, BER), both in dB
+    eb_no_and_ber_db: Tuple[float, float] | None = None  # (Eb/No, BER), both in dB
     # Bit 19
-    threshold_db: Optional[Tuple[float, float]] = None
+    threshold_db: Tuple[float, float] | None = None
     # Bit 18
-    compression_point_dbm: Optional[float] = None
+    compression_point_dbm: float | None = None
     # Bit 17
-    intercept_points_dbm: Optional[Tuple[float, float]] = None  # (2nd, 3rd order)
+    intercept_points_dbm: Tuple[float, float] | None = None  # (2nd, 3rd order)
     # Bit 16
-    snr_and_noise_figure_db: Optional[Tuple[float, float]] = None  # (SNR, Noise Figure)
+    snr_and_noise_figure_db: Tuple[float, float] | None = None  # (SNR, Noise Figure)
     # Bit 15
-    aux_frequency_hz: Optional[float] = None
+    aux_frequency_hz: float | None = None
     # Bit 14
-    aux_gain_db: Optional[Tuple[float, float]] = None
+    aux_gain_db: Tuple[float, float] | None = None
     # Bit 13
-    aux_bandwidth_hz: Optional[float] = None
+    aux_bandwidth_hz: float | None = None
     # Bit 11
-    array_of_cif_fields: Optional[ArrayOfCifFields] = None
+    array_of_cif_fields: ArrayOfCifFields | None = None
     # Bit 10
     spectrum: SpectrumField | None = None
     # Bit 9
-    sector_step_scan: Optional[SectorStepScanField] = None
+    sector_step_scan: SectorStepScanField | None = None
     # Bit 7
-    attributes: Optional[int] = None
+    attributes: int | None = None
     # Bits 6/5
-    discrete_io_32: Optional[int] = None
-    discrete_io_64: Optional[int] = None
+    discrete_io_32: int | None = None
+    discrete_io_64: int | None = None
     # Bit 4
-    health_status: Optional[int] = None
+    health_status: int | None = None
     # Bit 3
-    v49_spec_compliance: Optional[int] = None
+    v49_spec_compliance: int | None = None
     # Bit 2
-    build_info: Optional[BuildInformation] = None
+    build_info: BuildInformation | None = None
     # Bit 1
-    buffer_size: Optional[BufferSizeField] = None
+    buffer_size: BufferSizeField | None = None
 
     SUPPORTED_MASK = int(
         CIF1Flags.PHASE
@@ -811,25 +811,25 @@ class CIF1Fields:
             raise ValueError(f"Unsupported CIF1 bits set: 0x{unsupported:08X}")
 
         idx = 0  # byte index
-        phase: Optional[float] = None
-        eb_no_ber: Optional[Tuple[float, float]] = None
-        threshold: Optional[Tuple[float, float]] = None
-        compression: Optional[float] = None
-        intercept: Optional[Tuple[float, float]] = None
-        snr_nf: Optional[Tuple[float, float]] = None
-        aux_freq: Optional[float] = None
-        aux_gain: Optional[Tuple[float, float]] = None
-        aux_bw: Optional[float] = None
-        array_of_cif: Optional[ArrayOfCifFields] = None
-        spectrum: Optional[SpectrumField] = None
-        sector_field: Optional[SectorStepScanField] = None
-        attributes: Optional[int] = None
-        dio32: Optional[int] = None
-        dio64: Optional[int] = None
-        health: Optional[int] = None
-        spec_ver: Optional[int] = None
-        build: Optional[BuildInformation] = None
-        buffer_size: Optional[BufferSizeField] = None
+        phase: float | None = None
+        eb_no_ber: Tuple[float, float] | None = None
+        threshold: Tuple[float, float] | None = None
+        compression: float | None = None
+        intercept: Tuple[float, float] | None = None
+        snr_nf: Tuple[float, float] | None = None
+        aux_freq: float | None = None
+        aux_gain: Tuple[float, float] | None = None
+        aux_bw: float | None = None
+        array_of_cif: ArrayOfCifFields | None = None
+        spectrum: SpectrumField | None = None
+        sector_field: SectorStepScanField | None = None
+        attributes: int | None = None
+        dio32: int | None = None
+        dio64: int | None = None
+        health: int | None = None
+        spec_ver: int | None = None
+        build: BuildInformation | None = None
+        buffer_size: BufferSizeField | None = None
 
         def take_word() -> int:
             nonlocal idx
