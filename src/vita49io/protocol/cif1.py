@@ -46,6 +46,13 @@ class WindowTimeDeltaInterpretation(IntEnum):
     TIME_NS = 3
 
 
+class CIF1Flags(IntFlag):
+    """Bit positions for CIF1 presence mask."""
+
+    NONE = 0
+    SPECTRUM = 1 << 10
+
+
 def _decode_signed_32(raw: int) -> int:
     """Decode a 32-bit two's-complement value to Python int."""
     v = raw & 0xFFFFFFFF
@@ -199,13 +206,13 @@ class CIF1Fields:
 
     spectrum: SpectrumField | None = None
 
-    SUPPORTED_MASK = 1 << 10
+    SUPPORTED_MASK = int(CIF1Flags.SPECTRUM)
 
     def _presence_mask(self) -> int:
-        m = 0
+        m = CIF1Flags.NONE
         if self.spectrum is not None:
-            m |= 1 << 10
-        return m
+            m |= CIF1Flags.SPECTRUM
+        return int(m)
 
     def pack(self) -> bytes:
         """Serialize CIF1 fields (without the mask word)."""
@@ -226,13 +233,15 @@ class CIF1Fields:
         if len(mv) % 4 != 0:
             raise ValueError("CIF1 payload must be a whole number of 32-bit words")
 
-        unsupported = mask & ~CIF1Fields.SUPPORTED_MASK
+        flags = CIF1Flags(mask)
+
+        unsupported = int(flags & ~CIF1Flags.SPECTRUM)
         if unsupported:
             raise ValueError(f"Unsupported CIF1 bits set: 0x{unsupported:08X}")
 
         idx = 0  # byte index
         spectrum: SpectrumField | None = None
-        if mask & (1 << 10):
+        if flags & CIF1Flags.SPECTRUM:
             needed = SpectrumField.NUM_WORDS * 4
             if idx + needed > len(mv):
                 raise ValueError("Truncated Spectrum field")
@@ -249,4 +258,5 @@ __all__ = [
     "SpectrumField",
     "SpectrumType",
     "WindowTimeDeltaInterpretation",
+    "CIF1Flags",
 ]

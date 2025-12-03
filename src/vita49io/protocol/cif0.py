@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import struct
 from typing import List, Optional, Sequence, Tuple, Union
-from enum import IntEnum
+from enum import IntEnum, IntFlag
 
 from .enums import TSI, TSF
 from .utils import (
@@ -84,6 +84,53 @@ class DataItemFormat(IntEnum):
     UNSIGNED_FIXED_POINT = 0b10000 # Unsigned fixed-point, normalized [0, 1-2^-N]
     IEEE754_SINGLE = 0b01110  # Standard 32 float.       
     
+
+class CIF0Flags(IntFlag):
+    """Bit positions for CIF0 presence mask."""
+
+    NONE = 0
+    CONTEXT_FIELD_CHANGE_INDICATOR = 1 << 31
+    REFERENCE_POINT_IDENTIFIER = 1 << 30
+    BANDWIDTH = 1 << 29
+    IF_REFERENCE_FREQUENCY = 1 << 28
+    RF_REFERENCE_FREQUENCY = 1 << 27
+    RF_REFERENCE_FREQUENCY_OFFSET = 1 << 26
+    IF_BAND_OFFSET = 1 << 25
+    REFERENCE_LEVEL_DBM = 1 << 24
+    GAIN_DB = 1 << 23
+    OVER_RANGE_COUNT = 1 << 22
+    SAMPLE_RATE = 1 << 21
+    TIMESTAMP_ADJUSTMENT = 1 << 20
+    TIMESTAMP_CALIBRATION = 1 << 19
+    TEMPERATURE = 1 << 18
+    DEVICE_IDENTIFIER = 1 << 17
+    STATE_EVENT_INDICATORS = 1 << 16
+    DATA_PACKET_PAYLOAD_FORMAT = 1 << 15
+    FORMATTED_GPS_GEOLOCATION = 1 << 14
+    FORMATTED_INS_GEOLOCATION = 1 << 13
+    ECEF_EPHEMERIS = 1 << 12
+    RELATIVE_EPHEMERIS = 1 << 11
+    EPHEMERIS_REFERENCE_IDENTIFIER = 1 << 10
+    GPS_ASCII = 1 << 9
+    CONTEXT_ASSOCIATION_LISTS = 1 << 8
+    RESERVED_7 = 1 << 7
+    RESERVED_6 = 1 << 6
+    RESERVED_5 = 1 << 5
+    RESERVED_4 = 1 << 4
+    RESERVED_3 = 1 << 3
+    RESERVED_2 = 1 << 2
+    RESERVED_1 = 1 << 1
+    RESERVED_0 = 1 << 0
+    LOW_RESERVED_MASK = (
+        RESERVED_7
+        | RESERVED_6
+        | RESERVED_5
+        | RESERVED_4
+        | RESERVED_3
+        | RESERVED_2
+        | RESERVED_1
+        | RESERVED_0
+    )
 
 
 @dataclass
@@ -579,58 +626,56 @@ class CIF0Fields:
     raw_low_bits: int = 0
 
     def _presence_mask(self) -> int:
-        m = 0
-        # Include raw low bits (14..0) as-is
-        m |= (self.raw_low_bits & 0xFF)
+        mask = CIF0Flags(self.raw_low_bits & int(CIF0Flags.LOW_RESERVED_MASK))
         if self.context_field_change_indicator:
-            m |= 1 << 31
+            mask |= CIF0Flags.CONTEXT_FIELD_CHANGE_INDICATOR
         if self.reference_point_identifier is not None:
-            m |= 1 << 30
+            mask |= CIF0Flags.REFERENCE_POINT_IDENTIFIER
         if self.bandwidth_hz is not None:
-            m |= 1 << 29
+            mask |= CIF0Flags.BANDWIDTH
         if self.if_reference_frequency_hz is not None:
-            m |= 1 << 28
+            mask |= CIF0Flags.IF_REFERENCE_FREQUENCY
         if self.rf_reference_frequency_hz is not None:
-            m |= 1 << 27
+            mask |= CIF0Flags.RF_REFERENCE_FREQUENCY
         if self.rf_reference_frequency_offset_hz is not None:
-            m |= 1 << 26
+            mask |= CIF0Flags.RF_REFERENCE_FREQUENCY_OFFSET
         if self.if_band_offset_hz is not None:
-            m |= 1 << 25
+            mask |= CIF0Flags.IF_BAND_OFFSET
         if self.reference_level_dbm is not None:
-            m |= 1 << 24
+            mask |= CIF0Flags.REFERENCE_LEVEL_DBM
         if self.gain_db is not None:
-            m |= 1 << 23
+            mask |= CIF0Flags.GAIN_DB
         if self.over_range_count is not None:
-            m |= 1 << 22
+            mask |= CIF0Flags.OVER_RANGE_COUNT
         if self.sample_rate_hz is not None:
-            m |= 1 << 21
+            mask |= CIF0Flags.SAMPLE_RATE
         if self.timestamp_adjustment_fs is not None:
-            m |= 1 << 20
+            mask |= CIF0Flags.TIMESTAMP_ADJUSTMENT
         if self.timestamp_calibration_time_s is not None:
-            m |= 1 << 19
+            mask |= CIF0Flags.TIMESTAMP_CALIBRATION
         if self.temperature_c is not None:
-            m |= 1 << 18
+            mask |= CIF0Flags.TEMPERATURE
         if self.device_identifier is not None:
-            m |= 1 << 17
+            mask |= CIF0Flags.DEVICE_IDENTIFIER
         if self.state_event_indicators is not None:
-            m |= 1 << 16
+            mask |= CIF0Flags.STATE_EVENT_INDICATORS
         if self.data_packet_payload_format is not None:
-            m |= 1 << 15
+            mask |= CIF0Flags.DATA_PACKET_PAYLOAD_FORMAT
         if self.formatted_gps_geolocation is not None:
-            m |= 1 << 14
+            mask |= CIF0Flags.FORMATTED_GPS_GEOLOCATION
         if self.formatted_ins_geolocation is not None:
-            m |= 1 << 13
+            mask |= CIF0Flags.FORMATTED_INS_GEOLOCATION
         if self.ecef_ephemeris is not None:
-            m |= 1 << 12
+            mask |= CIF0Flags.ECEF_EPHEMERIS
         if self.relative_ephemeris is not None:
-            m |= 1 << 11
+            mask |= CIF0Flags.RELATIVE_EPHEMERIS
         if self.ephemeris_reference_identifier is not None:
-            m |= 1 << 10
+            mask |= CIF0Flags.EPHEMERIS_REFERENCE_IDENTIFIER
         if self.gps_ascii is not None:
-            m |= 1 << 9
+            mask |= CIF0Flags.GPS_ASCII
         if self.context_association_lists is not None:
-            m |= 1 << 8
-        return m
+            mask |= CIF0Flags.CONTEXT_ASSOCIATION_LISTS
+        return int(mask)
 
     def pack(self) -> bytes:
         """Serialize the CIF0 fields into bytes beginning with the mask word."""
@@ -739,74 +784,76 @@ class CIF0Fields:
 
         f = CIF0Fields()
 
-        f.context_field_change_indicator = bool(mask & (1 << 31))
+        flags = CIF0Flags(mask)
+
+        f.context_field_change_indicator = bool(flags & CIF0Flags.CONTEXT_FIELD_CHANGE_INDICATOR)
         # Save raw low bits 14..0
-        f.raw_low_bits = mask & 0xFF
-        if mask & (1 << 30):
+        f.raw_low_bits = int(flags & CIF0Flags.LOW_RESERVED_MASK)
+        if flags & CIF0Flags.REFERENCE_POINT_IDENTIFIER:
             f.reference_point_identifier = struct.unpack_from(">I", mv, idx)[0]
             idx += 4
-        if mask & (1 << 29):
+        if flags & CIF0Flags.BANDWIDTH:
             hi, lo = struct.unpack_from(">II", mv, idx)
             f.bandwidth_hz = _from_s64_fixed20(hi, lo)
             idx += 8
-        if mask & (1 << 28):
+        if flags & CIF0Flags.IF_REFERENCE_FREQUENCY:
             hi, lo = struct.unpack_from(">II", mv, idx)
             f.if_reference_frequency_hz = _from_s64_fixed20(hi, lo)
             idx += 8
-        if mask & (1 << 27):
+        if flags & CIF0Flags.RF_REFERENCE_FREQUENCY:
             hi, lo = struct.unpack_from(">II", mv, idx)
             f.rf_reference_frequency_hz = _from_s64_fixed20(hi, lo)
             idx += 8
-        if mask & (1 << 26):
+        if flags & CIF0Flags.RF_REFERENCE_FREQUENCY_OFFSET:
             hi, lo = struct.unpack_from(">II", mv, idx)
             f.rf_reference_frequency_offset_hz = _from_s64_fixed20(hi, lo)
             idx += 8
-        if mask & (1 << 25):
+        if flags & CIF0Flags.IF_BAND_OFFSET:
             hi, lo = struct.unpack_from(">II", mv, idx)
             f.if_band_offset_hz = _from_s64_fixed20(hi, lo)
             idx += 8
-        if mask & (1 << 24):
+        if flags & CIF0Flags.REFERENCE_LEVEL_DBM:
             w = struct.unpack_from(">I", mv, idx)[0]
             f.reference_level_dbm = _from_s16_fixed7(w & 0xFFFF)
             idx += 4
-        if mask & (1 << 23):
+        if flags & CIF0Flags.GAIN_DB:
             w = struct.unpack_from(">I", mv, idx)[0]
             a = _from_s16_fixed7((w >> 16) & 0xFFFF)
             b = _from_s16_fixed7(w & 0xFFFF)
             f.gain_db = (a, b)
             idx += 4
-        if mask & (1 << 22):
+        if flags & CIF0Flags.OVER_RANGE_COUNT:
             f.over_range_count = struct.unpack_from(">I", mv, idx)[0]
             idx += 4
-        if mask & (1 << 21):
+        if flags & CIF0Flags.SAMPLE_RATE:
             hi, lo = struct.unpack_from(">II", mv, idx)
             f.sample_rate_hz = _from_u64_fixed20(hi, lo)
             idx += 8
-        if mask & (1 << 20):
+        if flags & CIF0Flags.TIMESTAMP_ADJUSTMENT:
             hi, lo = struct.unpack_from(">II", mv, idx)
             i = (hi << 32) | lo
             if i & (1 << 63):
                 i -= 1 << 64
             f.timestamp_adjustment_fs = i
             idx += 8
-        if mask & (1 << 19):
+        if flags & CIF0Flags.TIMESTAMP_CALIBRATION:
             f.timestamp_calibration_time_s = struct.unpack_from(">I", mv, idx)[0]
             idx += 4
-        if mask & (1 << 18):
+        if flags & CIF0Flags.TEMPERATURE:
             w = struct.unpack_from(">I", mv, idx)[0]
             if w & 0x80000000:
                 w = (w - 0x100000000)  # s32
             f.temperature_c = w
             idx += 4
-        if mask & (1 << 17):
+        if flags & CIF0Flags.DEVICE_IDENTIFIER:
             oui, dev = struct.unpack_from(">II", mv, idx)
             oui &= 0xFFFFFF
             f.device_identifier = (oui, dev)
             idx += 8
-        if mask & (1 << 16):
+        if flags & CIF0Flags.STATE_EVENT_INDICATORS:
             f.state_event_indicators = struct.unpack_from(">I", mv, idx)[0]
             idx += 4
-        if mask & (1 << 15):
+        if flags & CIF0Flags.DATA_PACKET_PAYLOAD_FORMAT:
             w0, w1 = struct.unpack_from(">II", mv, idx)
             f.data_packet_payload_format = (w0, w1)
             # Also provide a decoded, user-friendly view
@@ -815,32 +862,32 @@ class CIF0Fields:
             except Exception:
                 f.payload_format = None
             idx += 8
-        if mask & (1 << 14):
+        if flags & CIF0Flags.FORMATTED_GPS_GEOLOCATION:
             segment = struct.unpack_from(f">{FormattedGeolocation.NUM_WORDS}I", mv, idx)
             f.formatted_gps_geolocation = FormattedGeolocation.parse(segment)
             idx += FormattedGeolocation.NUM_WORDS * 4
-        if mask & (1 << 13):
+        if flags & CIF0Flags.FORMATTED_INS_GEOLOCATION:
             segment = struct.unpack_from(f">{FormattedGeolocation.NUM_WORDS}I", mv, idx)
             f.formatted_ins_geolocation = FormattedGeolocation.parse(segment)
             idx += FormattedGeolocation.NUM_WORDS * 4
-        if mask & (1 << 12):
+        if flags & CIF0Flags.ECEF_EPHEMERIS:
             segment = struct.unpack_from(f">{Ephemeris.NUM_WORDS}I", mv, idx)
             f.ecef_ephemeris = Ephemeris.parse(segment)
             idx += Ephemeris.NUM_WORDS * 4
-        if mask & (1 << 11):
+        if flags & CIF0Flags.RELATIVE_EPHEMERIS:
             segment = struct.unpack_from(f">{Ephemeris.NUM_WORDS}I", mv, idx)
             f.relative_ephemeris = Ephemeris.parse(segment)
             idx += Ephemeris.NUM_WORDS * 4
-        if mask & (1 << 10):
+        if flags & CIF0Flags.EPHEMERIS_REFERENCE_IDENTIFIER:
             f.ephemeris_reference_identifier = struct.unpack_from(">I", mv, idx)[0]
             idx += 4
-        if mask & (1 << 9):
+        if flags & CIF0Flags.GPS_ASCII:
             # Need two header words to learn payload length
             remaining_words = [struct.unpack_from(">I", mv, offset)[0] for offset in range(idx, len(mv), 4)]
             gps_ascii, consumed = GPSASCIIField.parse(remaining_words)
             f.gps_ascii = gps_ascii
             idx += consumed * 4
-        if mask & (1 << 8):
+        if flags & CIF0Flags.CONTEXT_ASSOCIATION_LISTS:
             remaining_words = [struct.unpack_from(">I", mv, offset)[0] for offset in range(idx, len(mv), 4)]
             cal, consumed = ContextAssociationLists.parse(remaining_words)
             f.context_association_lists = cal
@@ -886,6 +933,7 @@ __all__ = [
     "Ephemeris",
     "GPSASCIIField",
     "ContextAssociationLists",
+    "CIF0Flags",
     "_encode_fixed_point",
     "_decode_fixed_point",
 ]
