@@ -10,8 +10,12 @@ import pytest
 from vita49io import (
     CIF0Fields,
     CIF1Fields,
+    BufferSizeField,
+    BuildInformation,
     ContextPacket,
     PacketType,
+    SectorStepRecord,
+    SectorStepScanField,
     SpectrumField,
     SpectrumType,
     AveragingType,
@@ -340,4 +344,94 @@ def test_spectrum_unknown_type_and_averaging_bits_roundtrip():
 
 def test_cif1_parse_rejects_unsupported_bits():
     with pytest.raises(ValueError):
-        CIF1Fields.parse_from_mask(int(CIF1Flags.SPECTRUM) | (1 << 9), b"")
+        CIF1Fields.parse_from_mask(int(CIF1Flags.SPECTRUM) | (1 << 8), b"")
+
+
+def test_cif1_additional_fields_roundtrip():
+    build = BuildInformation(year=2025, day=123, revision=7, user_defined=0x1FF)
+    buffer = BufferSizeField(buffer_size_bytes=4096, level=0x80, status=0x02)
+    cif1 = CIF1Fields(
+        phase_radians=1.5,
+        eb_no_and_ber_db=(12.5, -45.0),
+        threshold_db=(5.0, 10.0),
+        compression_point_dbm=1.0,
+        intercept_points_dbm=(30.0, 25.0),
+        snr_and_noise_figure_db=(45.25, 3.75),
+        aux_frequency_hz=1_000_000.25,
+        aux_gain_db=(2.0, -1.5),
+        aux_bandwidth_hz=200_000.0,
+        attributes=0xA5A5A5A5,
+        discrete_io_32=0xDEADBEEF,
+        discrete_io_64=0x123456789ABCDEF0,
+        health_status=0x1234,
+        v49_spec_compliance=4,
+        build_info=build,
+        buffer_size=buffer,
+    )
+
+    mask = cif1._presence_mask()
+    raw = cif1.pack()
+    parsed, used = CIF1Fields.parse_from_mask(mask, raw)
+    assert used == len(_payload_bytes_to_words(raw))
+    assert parsed.phase_radians is not None
+    assert pytest.approx(parsed.phase_radians, rel=1e-6) == 1.5
+    assert parsed.eb_no_and_ber_db == pytest.approx((12.5, -45.0))
+    assert parsed.threshold_db == pytest.approx((5.0, 10.0))
+    assert parsed.compression_point_dbm == pytest.approx(1.0)
+    assert parsed.intercept_points_dbm == pytest.approx((30.0, 25.0))
+    assert parsed.snr_and_noise_figure_db == pytest.approx((45.25, 3.75))
+    assert parsed.aux_frequency_hz == pytest.approx(1_000_000.25)
+    assert parsed.aux_gain_db == pytest.approx((2.0, -1.5))
+    assert parsed.aux_bandwidth_hz == pytest.approx(200_000.0)
+    assert parsed.attributes == 0xA5A5A5A5
+    assert parsed.discrete_io_32 == 0xDEADBEEF
+    assert parsed.discrete_io_64 == 0x123456789ABCDEF0
+    assert parsed.health_status == 0x1234
+    assert parsed.v49_spec_compliance == 4
+    assert parsed.build_info == build
+    assert parsed.buffer_size == buffer
+
+
+def test_sector_step_scan_roundtrip():
+    rec1 = SectorStepRecord(
+        sector_number=1,
+        f1_start_frequency_hz=1000.0,
+        f2_stop_frequency_hz=2000.0,
+        resolution_bandwidth_hz=10.0,
+        tune_step_size_hz=50.0,
+        number_of_points=10,
+        default_gain_db=(1.0, 2.0),
+        threshold_db=(3.0, 4.0),
+        dwell_time_fs=1_000_000,
+        start_time_fs=2_000_000,
+        time3_fs=3_000_000,
+        time4_fs=4_000_000,
+    )
+    rec2 = SectorStepRecord(
+        sector_number=2,
+        f1_start_frequency_hz=3000.0,
+        f2_stop_frequency_hz=4000.0,
+        resolution_bandwidth_hz=20.0,
+        tune_step_size_hz=75.0,
+        number_of_points=12,
+        default_gain_db=(1.5, 2.5),
+        threshold_db=(5.0, 6.0),
+        dwell_time_fs=5_000_000,
+        start_time_fs=6_000_000,
+        time3_fs=7_000_000,
+        time4_fs=8_000_000,
+    )
+    sector_field = SectorStepScanField(records=[rec1, rec2])
+    cif1 = CIF1Fields(sector_step_scan=sector_field)
+    mask = cif1._presence_mask()
+    raw = cif1.pack()
+
+    parsed, used_words = CIF1Fields.parse_from_mask(mask, raw)
+    assert used_words == len(_payload_bytes_to_words(raw))
+    parsed_sector = parsed.sector_step_scan
+    assert parsed_sector is not None
+    assert len(parsed_sector.records) == 2
+    assert parsed_sector.records[0].sector_number == 1
+    assert pytest.approx(parsed_sector.records[0].f1_start_frequency_hz) == 1000.0
+    assert pytest.approx(parsed_sector.records[1].tune_step_size_hz) == 75.0
+    assert parsed_sector.records[1].number_of_points == 12

@@ -20,7 +20,7 @@ Examples:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import struct
 from typing import List, Optional, Sequence, Tuple, Union
 from enum import IntEnum, IntFlag
@@ -610,6 +610,13 @@ class CIF0Fields:
     context_association_lists: Optional["ContextAssociationLists"] = None
     # Bit 1 (CIF1 mask + payload)
     cif1: Optional[CIF1Fields] = None
+    # Internal caches to preserve original payload words on roundtrip
+    _raw_rf_reference_frequency_words: Optional[Tuple[int, int]] = field(default=None, repr=False, init=False)
+    _parsed_rf_reference_frequency_hz: Optional[float] = field(default=None, repr=False, init=False)
+    _raw_reference_level_word: Optional[int] = field(default=None, repr=False, init=False)
+    _parsed_reference_level_dbm: Optional[float] = field(default=None, repr=False, init=False)
+    _raw_device_identifier_words: Optional[Tuple[int, int]] = field(default=None, repr=False, init=False)
+    _parsed_device_identifier: Optional[Tuple[int, int]] = field(default=None, repr=False, init=False)
 
     def _presence_mask(self) -> int:
         mask = CIF0Flags.NONE
@@ -679,7 +686,13 @@ class CIF0Fields:
             hi, lo = _to_s64_fixed20(self.if_reference_frequency_hz)
             words.extend([hi, lo])
         if self.rf_reference_frequency_hz is not None:
-            hi, lo = _to_s64_fixed20(self.rf_reference_frequency_hz)
+            if (
+                self._raw_rf_reference_frequency_words is not None
+                and self._parsed_rf_reference_frequency_hz == self.rf_reference_frequency_hz
+            ):
+                hi, lo = self._raw_rf_reference_frequency_words
+            else:
+                hi, lo = _to_s64_fixed20(self.rf_reference_frequency_hz)
             words.extend([hi, lo])
         if self.rf_reference_frequency_offset_hz is not None:
             hi, lo = _to_s64_fixed20(self.rf_reference_frequency_offset_hz)
@@ -688,7 +701,13 @@ class CIF0Fields:
             hi, lo = _to_s64_fixed20(self.if_band_offset_hz)
             words.extend([hi, lo])
         if self.reference_level_dbm is not None:
-            w = _to_s16_fixed7(self.reference_level_dbm)
+            if (
+                self._raw_reference_level_word is not None
+                and self._parsed_reference_level_dbm == self.reference_level_dbm
+            ):
+                w = self._raw_reference_level_word
+            else:
+                w = _to_s16_fixed7(self.reference_level_dbm)
             words.append(w)
         if self.gain_db is not None:
             a, b = self.gain_db
@@ -708,8 +727,12 @@ class CIF0Fields:
         if self.temperature_c is not None:
             words.append(_u32(self.temperature_c))
         if self.device_identifier is not None:
-            oui, dev = self.device_identifier
-            words.extend([_u32(oui & 0xFFFFFF), _u32(dev)])
+            if self._raw_device_identifier_words is not None and self.device_identifier == self._parsed_device_identifier:
+                oui_word, dev_word = self._raw_device_identifier_words
+                words.extend([oui_word, dev_word])
+            else:
+                oui, dev = self.device_identifier
+                words.extend([_u32(oui & 0xFFFFFF), _u32(dev)])
         if self.state_event_indicators is not None:
             words.append(_u32(self.state_event_indicators))
         if self.data_packet_payload_format is not None or self.payload_format is not None:
@@ -792,6 +815,8 @@ class CIF0Fields:
         if flags & CIF0Flags.RF_REFERENCE_FREQUENCY:
             hi, lo = struct.unpack_from(">II", mv, idx)
             f.rf_reference_frequency_hz = _from_s64_fixed20(hi, lo)
+            f._raw_rf_reference_frequency_words = (_u32(hi), _u32(lo))
+            f._parsed_rf_reference_frequency_hz = f.rf_reference_frequency_hz
             idx += 8
         if flags & CIF0Flags.RF_REFERENCE_FREQUENCY_OFFSET:
             hi, lo = struct.unpack_from(">II", mv, idx)
@@ -804,6 +829,8 @@ class CIF0Fields:
         if flags & CIF0Flags.REFERENCE_LEVEL_DBM:
             w = struct.unpack_from(">I", mv, idx)[0]
             f.reference_level_dbm = _from_s16_fixed7(w & 0xFFFF)
+            f._raw_reference_level_word = _u32(w)
+            f._parsed_reference_level_dbm = f.reference_level_dbm
             idx += 4
         if flags & CIF0Flags.GAIN_DB:
             w = struct.unpack_from(">I", mv, idx)[0]
@@ -835,9 +862,11 @@ class CIF0Fields:
             f.temperature_c = w
             idx += 4
         if flags & CIF0Flags.DEVICE_IDENTIFIER:
-            oui, dev = struct.unpack_from(">II", mv, idx)
-            oui &= 0xFFFFFF
+            oui_word, dev = struct.unpack_from(">II", mv, idx)
+            oui = oui_word & 0xFFFFFF
             f.device_identifier = (oui, dev)
+            f._raw_device_identifier_words = (_u32(oui_word), _u32(dev))
+            f._parsed_device_identifier = f.device_identifier
             idx += 8
         if flags & CIF0Flags.STATE_EVENT_INDICATORS:
             f.state_event_indicators = struct.unpack_from(">I", mv, idx)[0]
