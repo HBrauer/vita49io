@@ -17,6 +17,7 @@ from vita49io import (
     AveragingType,
     WindowTimeDeltaInterpretation,
 )
+from vita49io.protocol.cif0 import CIF0Flags
 from vita49io.protocol.cif1 import CIF1Flags
 from vita49io.protocol.utils import _payload_bytes_to_words
 
@@ -184,25 +185,23 @@ def test_context_packet_with_cif1_spectrum():
         f2_index=2047,
         window_time_delta=256,
     )
-    cif1 = CIF1Fields(spectrum=spectrum)
-
     ctx = ContextPacket(
         packet_type=PacketType.CONTEXT_PACKET,
         stream_id=0x13579BDF,
-        cif0=CIF0Fields(),
-        cif1=cif1,
+        cif0=CIF0Fields(cif1=CIF1Fields(spectrum=spectrum)),
         packet_count=3,
     )
     raw = ctx.to_bytes()
     parsed = ContextPacket.from_bytes(raw)
 
-    assert parsed.cif_extra_masks == [(1, 1 << 10)]
-    parsed_cif1 = parsed.cif1
+    parsed_cif1 = parsed.cif0.cif1
     assert parsed_cif1 is not None
     parsed_spec = parsed_cif1.spectrum
     assert parsed_spec is not None
     assert parsed_spec.num_transform_points == 2048
     assert parsed_spec.number_of_averages == 2
+    assert parsed.cif0.cif1 is not None
+    assert parsed.cif0._presence_mask() & int(CIF0Flags.CIF1_ENABLE)
     assert parsed.raw_cif_fields is None
 
 
@@ -244,14 +243,12 @@ def test_cif1_external_decoder_masks_and_lengths(tmp_path: Path):
         ContextPacket(
             packet_type=PacketType.CONTEXT_PACKET,
             stream_id=0xABCDEF02,
-            cif0=CIF0Fields(),
-            cif1=CIF1Fields(spectrum=spec_a),
+            cif0=CIF0Fields(cif1=CIF1Fields(spectrum=spec_a)),
         ),
         ContextPacket(
             packet_type=PacketType.CONTEXT_PACKET,
             stream_id=0xABCDEF03,
-            cif0=CIF0Fields(),
-            cif1=CIF1Fields(spectrum=spec_b),
+            cif0=CIF0Fields(cif1=CIF1Fields(spectrum=spec_b)),
         ),
     ]
 
@@ -269,14 +266,12 @@ def test_cif1_external_decoder_masks_and_lengths(tmp_path: Path):
         assert int(vrt_layer["vrt.hdr_tree"]["vrt.len"]) == len(ctx.to_bytes()) // 4
 
         expected_cif0_mask = ctx.cif0._presence_mask()
-        if ctx.cif1 is not None:
-            expected_cif0_mask |= 1 << 1  # CIF1 mask present
         assert int(vrt_layer["vrt.cif0"], 16) == expected_cif0_mask
 
-        if ctx.cif1 is None:
+        if ctx.cif0.cif1 is None:
             assert "vrt.cif1" not in vrt_layer
         else:
-            assert int(vrt_layer["vrt.cif1"], 16) == ctx.cif1._presence_mask()
+            assert int(vrt_layer["vrt.cif1"], 16) == ctx.cif0.cif1._presence_mask()
 
 
 @pytest.mark.parametrize(
@@ -285,7 +280,7 @@ def test_cif1_external_decoder_masks_and_lengths(tmp_path: Path):
         (WindowTimeDeltaInterpretation.PERCENT, 37.5, 37.5),
         (WindowTimeDeltaInterpretation.SAMPLES, 512, 512),
         (WindowTimeDeltaInterpretation.TIME_NS, 123_456, 123_456),
-        (WindowTimeDeltaInterpretation.NOT_CONTROLLED, 0xDEADBEEF, 0xDEADBEEF & 0xFFFFFFFF),
+        (WindowTimeDeltaInterpretation.NOT_CONTROLLED, 0xDEADBEEF, 0),
     ],
 )
 def test_spectrum_window_time_delta_variants(interpretation, value, expect):

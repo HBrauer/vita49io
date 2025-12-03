@@ -25,6 +25,7 @@ import struct
 from typing import List, Optional, Sequence, Tuple, Union
 from enum import IntEnum, IntFlag
 
+from .cif1 import CIF1Fields
 from .enums import TSI, TSF
 from .utils import (
     _decode_fixed_point,
@@ -113,24 +114,11 @@ class CIF0Flags(IntFlag):
     EPHEMERIS_REFERENCE_IDENTIFIER = 1 << 10
     GPS_ASCII = 1 << 9
     CONTEXT_ASSOCIATION_LISTS = 1 << 8
-    RESERVED_7 = 1 << 7
-    RESERVED_6 = 1 << 6
-    RESERVED_5 = 1 << 5
-    RESERVED_4 = 1 << 4
-    RESERVED_3 = 1 << 3
-    RESERVED_2 = 1 << 2
-    RESERVED_1 = 1 << 1
+    FIELD_ATTRIBUTES_ENABLE = 1 << 7
+    CIF3_ENABLE = 1 << 3
+    CIF2_ENABLE = 1 << 2
+    CIF1_ENABLE = 1 << 1
     RESERVED_0 = 1 << 0
-    LOW_RESERVED_MASK = (
-        RESERVED_7
-        | RESERVED_6
-        | RESERVED_5
-        | RESERVED_4
-        | RESERVED_3
-        | RESERVED_2
-        | RESERVED_1
-        | RESERVED_0
-    )
 
 
 @dataclass
@@ -566,7 +554,6 @@ class CIF0Fields:
         state_event_indicators (Optional[int]): State and event indicator bits.
         data_packet_payload_format (Optional[Tuple[int, int]]): Raw payload format words.
         payload_format (Optional[PayloadFormat]): Parsed payload format helper.
-        raw_low_bits (int): Unparsed lower mask bits reserved for future use.
 
     Examples:
         >>> from vita49io.protocol.cif0 import CIF0Fields
@@ -621,12 +608,11 @@ class CIF0Fields:
     gps_ascii: Optional["GPSASCIIField"] = None
     # Bit 8 (variable-length Context Association Lists section)
     context_association_lists: Optional["ContextAssociationLists"] = None
-
-    # Raw presence bits 7..0 preserved as-is (no additional words handled)
-    raw_low_bits: int = 0
+    # Bit 1 (CIF1 mask + payload)
+    cif1: Optional[CIF1Fields] = None
 
     def _presence_mask(self) -> int:
-        mask = CIF0Flags(self.raw_low_bits & int(CIF0Flags.LOW_RESERVED_MASK))
+        mask = CIF0Flags.NONE
         if self.context_field_change_indicator:
             mask |= CIF0Flags.CONTEXT_FIELD_CHANGE_INDICATOR
         if self.reference_point_identifier is not None:
@@ -675,6 +661,8 @@ class CIF0Fields:
             mask |= CIF0Flags.GPS_ASCII
         if self.context_association_lists is not None:
             mask |= CIF0Flags.CONTEXT_ASSOCIATION_LISTS
+        if self.cif1 is not None:
+            mask |= CIF0Flags.CIF1_ENABLE
         return int(mask)
 
     def pack(self) -> bytes:
@@ -744,6 +732,9 @@ class CIF0Fields:
             words.extend(self.gps_ascii.pack_words())
         if self.context_association_lists is not None:
             words.extend(self.context_association_lists.pack_words())
+        if self.cif1 is not None:
+            words.append(_u32(self.cif1._presence_mask()))
+            words.extend(_payload_bytes_to_words(self.cif1.pack()))
 
         out = bytearray(len(words) * 4)
         for i, w in enumerate(words):
@@ -787,8 +778,6 @@ class CIF0Fields:
         flags = CIF0Flags(mask)
 
         f.context_field_change_indicator = bool(flags & CIF0Flags.CONTEXT_FIELD_CHANGE_INDICATOR)
-        # Save raw low bits 14..0
-        f.raw_low_bits = int(flags & CIF0Flags.LOW_RESERVED_MASK)
         if flags & CIF0Flags.REFERENCE_POINT_IDENTIFIER:
             f.reference_point_identifier = struct.unpack_from(">I", mv, idx)[0]
             idx += 4
@@ -892,6 +881,14 @@ class CIF0Fields:
             cal, consumed = ContextAssociationLists.parse(remaining_words)
             f.context_association_lists = cal
             idx += consumed * 4
+        if flags & CIF0Flags.CIF1_ENABLE:
+            if idx + 4 > len(mv):
+                raise ValueError("Truncated CIF1 mask")
+            cif1_mask = struct.unpack_from(">I", mv, idx)[0]
+            idx += 4
+            cif1_fields, cif1_used_words = CIF1Fields.parse_from_mask(cif1_mask, mv[idx:])
+            f.cif1 = cif1_fields
+            idx += cif1_used_words * 4
         return f, idx // 4
 
     @staticmethod

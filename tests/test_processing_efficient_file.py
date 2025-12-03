@@ -47,7 +47,6 @@ class TestProcessingEfficientFile(unittest.TestCase):
             cif0=CIF0Fields(
                 payload_format=payload_format,
                 data_packet_payload_format=(pf_w0, pf_w1),
-                raw_low_bits=0,
             ),
         )
 
