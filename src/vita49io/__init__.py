@@ -30,6 +30,7 @@ from .protocol.cif1 import (
     WindowTimeDeltaInterpretation,
 )
 from .protocol.cif2 import CIF2Fields
+from .protocol.cif3 import CIF3Fields
 
 __all__ = [
     "DataPacket",
@@ -54,5 +55,6 @@ __all__ = [
     "AveragingType",
     "WindowTimeDeltaInterpretation",
     "CIF2Fields",
+    "CIF3Fields",
 ]
 

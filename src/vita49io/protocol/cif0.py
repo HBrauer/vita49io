@@ -27,6 +27,8 @@ from enum import IntEnum, IntFlag
 
 from .cif1 import CIF1Fields
 from .cif2 import CIF2Fields
+from .cif3 import CIF3Fields
+from .cif2 import CIF2Fields
 from .enums import TSI, TSF
 from .utils import (
     _decode_fixed_point,
@@ -613,6 +615,8 @@ class CIF0Fields:
     cif1: CIF1Fields | None = None
     # Bit 2 (CIF2 mask + payload)
     cif2: CIF2Fields | None = None
+    # Bit 3 (CIF3 mask + payload)
+    cif3: CIF3Fields | None = None
     # Internal caches to preserve original payload words on roundtrip
     _raw_rf_reference_frequency_words: Tuple[int, int] | None = field(default=None, repr=False, init=False)
     _parsed_rf_reference_frequency_hz: float | None = field(default=None, repr=False, init=False)
@@ -675,6 +679,8 @@ class CIF0Fields:
             mask |= CIF0Flags.CIF1_ENABLE
         if self.cif2 is not None:
             mask |= CIF0Flags.CIF2_ENABLE
+        if self.cif3 is not None:
+            mask |= CIF0Flags.CIF3_ENABLE
         return int(mask)
 
     def pack(self) -> bytes:
@@ -766,6 +772,9 @@ class CIF0Fields:
         if self.cif2 is not None:
             words.append(_u32(self.cif2._presence_mask()))
             words.extend(_payload_bytes_to_words(self.cif2.pack()))
+        if self.cif3 is not None:
+            words.append(_u32(self.cif3._presence_mask()))
+            words.extend(_payload_bytes_to_words(self.cif3.pack()))
 
         out = bytearray(len(words) * 4)
         for i, w in enumerate(words):
@@ -934,6 +943,14 @@ class CIF0Fields:
             cif2_fields, cif2_used_words = CIF2Fields.parse_from_mask(cif2_mask, mv[idx:])
             f.cif2 = cif2_fields
             idx += cif2_used_words * 4
+        if flags & CIF0Flags.CIF3_ENABLE:
+            if idx + 4 > len(mv):
+                raise ValueError("Truncated CIF3 mask")
+            cif3_mask = struct.unpack_from(">I", mv, idx)[0]
+            idx += 4
+            cif3_fields, cif3_used_words = CIF3Fields.parse_from_mask(cif3_mask, mv[idx:])
+            f.cif3 = cif3_fields
+            idx += cif3_used_words * 4
         return f, idx // 4
 
     @staticmethod
