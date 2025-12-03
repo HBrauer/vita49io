@@ -202,7 +202,6 @@ def test_context_packet_with_cif1_spectrum():
     assert parsed_spec.number_of_averages == 2
     assert parsed.cif0.cif1 is not None
     assert parsed.cif0._presence_mask() & int(CIF0Flags.CIF1_ENABLE)
-    assert parsed.raw_cif_fields is None
 
 
 @pytest.mark.skipif(_TSHARK_MISSING, reason="Set TSHARK_PATH in .env to enable tshark integration tests")

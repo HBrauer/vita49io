@@ -46,7 +46,6 @@ class ContextPacket(LazyBinary):
     _integer_seconds: int | None = None
     _fractional_seconds: int | None = None
     _cif0: CIF0Fields | None = None
-    _raw_cif_fields: Optional[List[int]] = None
 
     def __init__(
         self,
@@ -61,7 +60,6 @@ class ContextPacket(LazyBinary):
         integer_seconds: Optional[int] = None,
         fractional_seconds: Optional[int] = None,
         cif0: Optional[CIF0Fields] = None,
-        raw_cif_fields: Optional[List[int]] = None,
         # If true, set header.indicators_25 (V49.2-only packet)
         requiresVita49_2: bool = False,
         # If true, set header.indicators_24 (Timestamp Mode bit / TSM)
@@ -89,7 +87,6 @@ class ContextPacket(LazyBinary):
         self._integer_seconds = integer_seconds
         self._fractional_seconds = fractional_seconds
         self._cif0 = cif0
-        self._raw_cif_fields = raw_cif_fields
         # Newly built objects must be encoded; memoryview-backed packets can fast-path
         if _mv is None:
             self._mark_dirty()
@@ -204,13 +201,7 @@ class ContextPacket(LazyBinary):
         if len(payload) < 4:
             raise ValueError("Context packet missing CIF0 mask word")
         cif0, used_cif0_bytes = CIF0Fields.parse(payload)
-        remaining_after_cif0 = payload[used_cif0_bytes:]
-
-        remaining_words = [w[0] for w in struct.iter_unpack(">I", remaining_after_cif0)]
-        raw_cif_fields = remaining_words
-
         self._cif0 = cif0
-        self._raw_cif_fields = raw_cif_fields or None
         return cif0
 
     @property
@@ -222,17 +213,6 @@ class ContextPacket(LazyBinary):
     @cif0.setter
     def cif0(self, value: CIF0Fields) -> None:
         self._cif0 = value
-        self._mark_dirty()
-
-    @property
-    def raw_cif_fields(self) -> Optional[List[int]]:
-        if self._raw_cif_fields is None and self._cif0 is None and self._mv is not None:
-            self._decode_cif0()
-        return self._raw_cif_fields
-
-    @raw_cif_fields.setter
-    def raw_cif_fields(self, value: Optional[List[int]]) -> None:
-        self._raw_cif_fields = value
         self._mark_dirty()
 
     def __repr__(self) -> str:  # pragma: no cover - human-facing formatting
@@ -288,8 +268,6 @@ class ContextPacket(LazyBinary):
         cif0_words: List[int] = _payload_bytes_to_words(self.cif0.pack())
 
         words.extend(cif0_words)
-        if self.raw_cif_fields:
-            words.extend(self.raw_cif_fields)
 
         raw_bytes = _finalize_words_to_bytes(words)
         self._mv = memoryview(raw_bytes)

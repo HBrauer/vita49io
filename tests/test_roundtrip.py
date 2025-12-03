@@ -52,9 +52,6 @@ class TestVRT(unittest.TestCase):
         self.assertEqual(q.stream_id, 0x12340001)
 
     def test_with_class_id_and_no_trailer(self):
-        # Raw CIF fields to carry alongside CIF0 (1 word)
-        extra_bytes = b"\x01\x02\x03\x04"
-        extra_word = int.from_bytes(extra_bytes, byteorder="big")
         p = ContextPacket(
             packet_type=PacketType.CONTEXT_PACKET,
             stream_id=0x01020304,
@@ -62,7 +59,6 @@ class TestVRT(unittest.TestCase):
             tsi=TSI.NONE,
             tsf=TSF.NONE,
             cif0=CIF0Fields(),
-            raw_cif_fields=[extra_word],
         )
         b = p.to_bytes()
         q = ContextPacket.from_bytes(b)
@@ -71,10 +67,6 @@ class TestVRT(unittest.TestCase):
         self.assertEqual(q.class_id, (0x00AABB, 0x1122, 0x3344))
         self.assertEqual(q.tsi, TSI.NONE)
         self.assertEqual(q.tsf, TSF.NONE)
-        # Reconstruct bytes from raw_cif_fields and compare
-        self.assertIsNotNone(q.raw_cif_fields)
-        got_bytes = b"".join(int(w).to_bytes(4, byteorder="big") for w in q.raw_cif_fields)
-        self.assertEqual(got_bytes, extra_bytes)
         # Context packets have no trailer; bit has no meaning
         # Ensure no trailer attribute/field is present
         self.assertFalse(hasattr(q, "trailer"))
