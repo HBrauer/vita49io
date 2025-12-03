@@ -12,6 +12,13 @@ from .context_packet import ContextPacket  # noqa: F401
 from .enums import PacketType, TSI, TSF  # noqa: F401
 from .vrt_types import ClassID  # noqa: F401
 from .cif0 import CIF0Fields, PayloadFormat, PackingMethod, SampleType, DataItemFormat  # noqa: F401
+from .cif1 import (  # noqa: F401
+    AveragingType,
+    CIF1Fields,
+    SpectrumField,
+    SpectrumType,
+    WindowTimeDeltaInterpretation,
+)
 
 __all__ = [
     "DataPacket",
@@ -25,5 +32,10 @@ __all__ = [
     "PackingMethod",
     "SampleType",
     "DataItemFormat",
+    "CIF1Fields",
+    "SpectrumField",
+    "SpectrumType",
+    "AveragingType",
+    "WindowTimeDeltaInterpretation",
 ]
 

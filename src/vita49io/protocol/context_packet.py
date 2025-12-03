@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from .cif0 import CIF0Fields
+from .cif1 import CIF1Fields
 from .core import (
     Header,
     LazyBinary,
@@ -47,6 +48,7 @@ class ContextPacket(LazyBinary):
     _integer_seconds: int | None = None
     _fractional_seconds: int | None = None
     _cif0: CIF0Fields | None = None
+    _cif1: CIF1Fields | None = None
     _cif_extra_masks: Optional[List[Tuple[int, int]]] = None
     _raw_cif_fields: Optional[List[int]] = None
 
@@ -63,6 +65,7 @@ class ContextPacket(LazyBinary):
         integer_seconds: Optional[int] = None,
         fractional_seconds: Optional[int] = None,
         cif0: Optional[CIF0Fields] = None,
+        cif1: Optional[CIF1Fields] = None,
         cif_extra_masks: Optional[List[Tuple[int, int]]] = None,
         raw_cif_fields: Optional[List[int]] = None,
         # If true, set header.indicators_25 (V49.2-only packet)
@@ -92,6 +95,7 @@ class ContextPacket(LazyBinary):
         self._integer_seconds = integer_seconds
         self._fractional_seconds = fractional_seconds
         self._cif0 = cif0
+        self._cif1 = cif1
         self._cif_extra_masks = cif_extra_masks
         self._raw_cif_fields = raw_cif_fields
         # Newly built objects must be encoded; memoryview-backed packets can fast-path
@@ -219,9 +223,32 @@ class ContextPacket(LazyBinary):
         remaining = payload[pos:]
         cif0, used_cif0_words = CIF0Fields.parse_from_mask(cif0_mask, remaining)
         remaining_after_cif0 = remaining[used_cif0_words * 4 :]
-        raw_cif_fields = [w[0] for w in struct.iter_unpack(">I", remaining_after_cif0)]
+
+        cif1_mask = None
+        for i, m in extra_masks:
+            if i == 1:
+                cif1_mask = m
+                break
+
+        cif1: CIF1Fields | None = None
+        cif1_used = 0
+        if cif1_mask is not None and cif1_mask & CIF1Fields.SUPPORTED_MASK:
+            if cif1_mask & ~CIF1Fields.SUPPORTED_MASK:
+                cif1_used = 0
+            else:
+                try:
+                    cif1, cif1_used = CIF1Fields.parse_from_mask(cif1_mask, remaining_after_cif0)
+                except Exception:
+                    cif1 = None
+                    cif1_used = 0
+
+        remaining_words = [
+            w[0] for w in struct.iter_unpack(">I", remaining_after_cif0[cif1_used * 4 :])
+        ]
+        raw_cif_fields = remaining_words
 
         self._cif0 = cif0
+        self._cif1 = cif1
         self._cif_extra_masks = extra_masks or None
         self._raw_cif_fields = raw_cif_fields or None
         return cif0
@@ -235,6 +262,17 @@ class ContextPacket(LazyBinary):
     @cif0.setter
     def cif0(self, value: CIF0Fields) -> None:
         self._cif0 = value
+        self._mark_dirty()
+
+    @property
+    def cif1(self) -> Optional[CIF1Fields]:
+        if self._cif1 is None and self._cif0 is None and self._mv is not None:
+            self._decode_cif0()
+        return self._cif1
+
+    @cif1.setter
+    def cif1(self, value: Optional[CIF1Fields]) -> None:
+        self._cif1 = value
         self._mark_dirty()
 
     @property
@@ -280,6 +318,8 @@ class ContextPacket(LazyBinary):
         if self.fractional_seconds is not None:
             parts.append(f"fractional_seconds={int(self.fractional_seconds)}")
         parts.append(f"cif0={self._cif0 if self._cif0 is not None else 'lazy'}")
+        if self._cif1 is not None:
+            parts.append(f"cif1={self._cif1}")
         if self.cif_extra_masks:
             masks_summ = ", ".join(f"CIF{i}:{m & 0xFFFFFFFF:#010x}" for i, m in self.cif_extra_masks)
             parts.append(f"extra_masks=[{masks_summ}]")
@@ -314,13 +354,30 @@ class ContextPacket(LazyBinary):
             raise TypeError("cif0 is required for ContextPacket")
         cif0_words: List[int] = _payload_bytes_to_words(self.cif0.pack())
         cif0_mask = cif0_words[0]
+
+        extra_masks: dict[int, int] = {}
         if self.cif_extra_masks:
-            for i, _m in self.cif_extra_masks:
-                cif0_mask |= 1 << i
+            for i, m in self.cif_extra_masks:
+                extra_masks[i] = m
+
+        cif1_words: List[int] = []
+        if self.cif1 is not None:
+            cif1_mask = self.cif1._presence_mask()
+            if 1 in extra_masks and extra_masks[1] != cif1_mask:
+                raise ValueError("cif1 mask conflicts with provided cif_extra_masks entry")
+            extra_masks[1] = cif1_mask
+            cif1_bytes = self.cif1.pack()
+            cif1_words = _payload_bytes_to_words(cif1_bytes)
+
+        for i in sorted(extra_masks):
+            cif0_mask |= 1 << i
+
         words.append(_u32(cif0_mask))
-        for _i, m in (self.cif_extra_masks or []):
-            words.append(_u32(m))
+        for i in sorted(extra_masks):
+            words.append(_u32(extra_masks[i]))
         words.extend(cif0_words[1:])
+        if cif1_words:
+            words.extend(cif1_words)
         if self.raw_cif_fields:
             words.extend(self.raw_cif_fields)
 

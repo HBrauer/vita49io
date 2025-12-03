@@ -17,6 +17,13 @@ from .protocol.cif0 import (
     FormattedGeolocation,
     GPSASCIIField,
 )
+from .protocol.cif1 import (
+    AveragingType,
+    CIF1Fields,
+    SpectrumField,
+    SpectrumType,
+    WindowTimeDeltaInterpretation,
+)
 
 __all__ = [
     "DataPacket",
@@ -30,5 +37,10 @@ __all__ = [
     "Ephemeris",
     "GPSASCIIField",
     "ContextAssociationLists",
+    "CIF1Fields",
+    "SpectrumField",
+    "SpectrumType",
+    "AveragingType",
+    "WindowTimeDeltaInterpretation",
 ]
 
