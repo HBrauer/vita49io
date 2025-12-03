@@ -13,7 +13,7 @@ def vita_to_pcap(input_path):
     dst_ip = "192.168.1.200"
     sport = 4991
     dport = 4991
-
+    print(f"Reading VITA packets from {input_path}...")
     with open(input_path, "rb") as f:
         while True:
             hdr = f.read(4)
@@ -26,8 +26,10 @@ def vita_to_pcap(input_path):
             word0, = unpack(">I", hdr)   # VITA is big-endian
             pkt_words = word0 & 0xFFFF   # lower 16 bits = packet size (in 32-bit words)
             total_bytes = pkt_words * 4
+            print(f"word0 = 0x{word0:08X}")
+            print(f"Read packet with size {pkt_words} words ({total_bytes} bytes)")
 
-            if pkt_words < 4 or total_bytes < 4:
+            if total_bytes < 4:
                 print("Warning: invalid packet size, skipping...")
                 continue
 
