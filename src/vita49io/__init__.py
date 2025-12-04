@@ -19,7 +19,6 @@ from .protocol.cif0 import (
 )
 from .protocol.cif1 import (
     AveragingType,
-    ArrayOfCifFields,
     BufferSizeField,
     BuildInformation,
     CIF1Fields,
@@ -47,7 +46,6 @@ __all__ = [
     "CIF1Fields",
     "SectorStepRecord",
     "SectorStepScanField",
-    "ArrayOfCifFields",
     "BufferSizeField",
     "BuildInformation",
     "SpectrumField",

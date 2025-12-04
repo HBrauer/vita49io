@@ -476,15 +476,17 @@ class ContextAssociationLists:
         vec_size = len(self.vector_component_list)
         async_size = len(self.async_channel_list)
         tag_list = self.async_channel_tags
-        if src_size > 511 or sys_size > 511:
-            raise ValueError("Source/System list sizes must be <= 511")
+        if src_size > 511:
+            raise ValueError("Source list size must be <= 511")
+        if sys_size > 255:
+            raise ValueError("System list size must be <= 255")
         if vec_size > 0xFFFF:
             raise ValueError("Vector-component list size must fit in 16 bits")
         if async_size > 0x7FFF:
             raise ValueError("Async-channel list size must be <= 32767")
         if tag_list is not None and len(tag_list) != async_size:
             raise ValueError("Async-channel tag list length must match async-channel list size")
-        word0 = ((src_size & 0x1FF) << 23) | ((sys_size & 0x1FF) << 14)
+        word0 = ((src_size & 0x1FF) << 16) | (sys_size & 0xFF)
         word1 = ((vec_size & 0xFFFF) << 16) | ((1 if tag_list else 0) << 15) | (async_size & 0x7FFF)
         words: List[int] = [_u32(word0), _u32(word1)]
         words.extend(_u32(x) for x in self.source_list)
@@ -500,8 +502,8 @@ class ContextAssociationLists:
         if len(words) < 2:
             raise ValueError("Truncated Context Association Lists header")
         word0, word1 = words[0], words[1]
-        src_size = (word0 >> 23) & 0x1FF
-        sys_size = (word0 >> 14) & 0x1FF
+        src_size = (word0 >> 16) & 0x1FF
+        sys_size = word0 & 0xFF
         vec_size = (word1 >> 16) & 0xFFFF
         async_has_tags = bool((word1 >> 15) & 0x1)
         async_size = word1 & 0x7FFF
@@ -685,6 +687,14 @@ class CIF0Fields:
         words: List[int] = []
         words.append(self._presence_mask())
 
+        # Include CIF presence masks first for CIF1/2/3
+        if self.cif1 is not None:
+            words.append(_u32(self.cif1._presence_mask()))
+        if self.cif2 is not None:
+            words.append(_u32(self.cif2._presence_mask()))
+        if self.cif3 is not None:
+            words.append(_u32(self.cif3._presence_mask()))
+
         if self.reference_point_identifier is not None:
             words.append(_u32(self.reference_point_identifier))
         if self.bandwidth_hz is not None:
@@ -761,13 +771,10 @@ class CIF0Fields:
         if self.context_association_lists is not None:
             words.extend(self.context_association_lists.pack_words())
         if self.cif1 is not None:
-            words.append(_u32(self.cif1._presence_mask()))
             words.extend(_payload_bytes_to_words(self.cif1.pack()))
         if self.cif2 is not None:
-            words.append(_u32(self.cif2._presence_mask()))
             words.extend(_payload_bytes_to_words(self.cif2.pack()))
         if self.cif3 is not None:
-            words.append(_u32(self.cif3._presence_mask()))
             words.extend(_payload_bytes_to_words(self.cif3.pack()))
 
         out = bytearray(len(words) * 4)

@@ -22,7 +22,7 @@ from vita49io import (
     WindowTimeDeltaInterpretation,
 )
 from vita49io.protocol.cif0 import CIF0Flags
-from vita49io.protocol.cif1 import CIF1Flags
+from vita49io.protocol.cif1 import ArrayOfCifFields, CIF1Flags
 from vita49io.protocol.utils import _payload_bytes_to_words
 
 
@@ -343,8 +343,25 @@ def test_spectrum_unknown_type_and_averaging_bits_roundtrip():
 
 
 def test_cif1_parse_rejects_unsupported_bits():
+    for mask in (int(CIF1Flags.SPECTRUM) | (1 << 8), int(CIF1Flags.ARRAY_OF_CIF)):
+        with pytest.raises(ValueError):
+            CIF1Fields.parse_from_mask(mask, b"")
+
+
+def test_cif1_array_of_cif_fields_is_rejected():
+    stub = ArrayOfCifFields(
+        cif0_mask=0,
+        cif1_mask=0,
+        cif2_mask=0,
+        cif3_mask=0,
+        cif7_mask=0,
+        records=[],
+    )
+    cif1 = CIF1Fields(array_of_cif_fields=stub)
     with pytest.raises(ValueError):
-        CIF1Fields.parse_from_mask(int(CIF1Flags.SPECTRUM) | (1 << 8), b"")
+        cif1._presence_mask()
+    with pytest.raises(ValueError):
+        cif1.pack()
 
 
 def test_cif1_additional_fields_roundtrip():

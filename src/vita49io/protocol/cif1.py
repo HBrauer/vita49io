@@ -463,7 +463,18 @@ def _parse_sector_record(rec_words: Sequence[int], indicator: int) -> SectorStep
 
 @dataclass
 class ArrayOfCifFields:
-    """Opaque support for the Array of CIF Fields capability."""
+    """9.13.1 Opaque support for the Array of CIF Fields capability.
+
+    This can be used if context information for several packets should be grouped into one context packet. For example, a
+    multi-channel SDR could send one packet containing:
+
+        RF Context (center frequency = 2.4 GHz)
+        IF Context (sample rate = 10 MHz)
+        Gain Context (per-channel gains)
+        GPS Context (time-of-day + PPS accuracy)
+
+    Note: packing/parsing through ``CIF1Fields`` is currently unsupported.
+    """
 
     cif0_mask: int
     cif1_mask: int
@@ -692,7 +703,6 @@ class CIF1Fields:
         | CIF1Flags.AUX_FREQUENCY
         | CIF1Flags.AUX_GAIN
         | CIF1Flags.AUX_BANDWIDTH
-        | CIF1Flags.ARRAY_OF_CIF
         | CIF1Flags.SPECTRUM
         | CIF1Flags.SECTOR_STEP_SCAN
         | CIF1Flags.ATTRIBUTES
@@ -725,7 +735,7 @@ class CIF1Fields:
         if self.aux_bandwidth_hz is not None:
             m |= CIF1Flags.AUX_BANDWIDTH
         if self.array_of_cif_fields is not None:
-            m |= CIF1Flags.ARRAY_OF_CIF
+            raise ValueError("ArrayOfCifFields is currently unsupported")
         if self.spectrum is not None:
             m |= CIF1Flags.SPECTRUM
         if self.sector_step_scan is not None:
@@ -749,6 +759,8 @@ class CIF1Fields:
     def pack(self) -> bytes:
         """Serialize CIF1 fields (without the mask word)."""
         words: List[int] = []
+        if self.array_of_cif_fields is not None:
+            raise ValueError("ArrayOfCifFields is currently unsupported")
         if self.phase_radians is not None:
             words.append(_u32(_to_s16_fixed7(self.phase_radians)))
         if self.eb_no_and_ber_db is not None:
@@ -769,8 +781,6 @@ class CIF1Fields:
         if self.aux_bandwidth_hz is not None:
             hi, lo = _to_s64_fixed20(self.aux_bandwidth_hz)
             words.extend([_u32(hi), _u32(lo)])
-        if self.array_of_cif_fields is not None:
-            words.extend(self.array_of_cif_fields.pack_words())
         if self.spectrum is not None:
             words.extend(self.spectrum.pack_words())
         if self.sector_step_scan is not None:
@@ -820,7 +830,6 @@ class CIF1Fields:
         aux_freq: float | None = None
         aux_gain: Tuple[float, float] | None = None
         aux_bw: float | None = None
-        array_of_cif: ArrayOfCifFields | None = None
         spectrum: SpectrumField | None = None
         sector_field: SectorStepScanField | None = None
         attributes: int | None = None
@@ -872,10 +881,6 @@ class CIF1Fields:
             hi, lo = struct.unpack_from(">II", mv, idx)
             aux_bw = _from_s64_fixed20(hi, lo)
             idx += 8
-        if flags & CIF1Flags.ARRAY_OF_CIF:
-            remaining_words = [struct.unpack_from(">I", mv, offset)[0] for offset in range(idx, len(mv), 4)]
-            array_of_cif, consumed = ArrayOfCifFields.parse(remaining_words)
-            idx += consumed * 4
         if flags & CIF1Flags.SPECTRUM:
             needed = SpectrumField.NUM_WORDS * 4
             if idx + needed > len(mv):
@@ -918,7 +923,6 @@ class CIF1Fields:
             aux_frequency_hz=aux_freq,
             aux_gain_db=aux_gain,
             aux_bandwidth_hz=aux_bw,
-            array_of_cif_fields=array_of_cif,
             spectrum=spectrum,
             sector_step_scan=sector_field,
             attributes=attributes,
