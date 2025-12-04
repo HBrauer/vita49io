@@ -819,6 +819,15 @@ class CIF0Fields:
         flags = CIF0Flags(mask)
 
         f.context_field_change_indicator = bool(flags & CIF0Flags.CONTEXT_FIELD_CHANGE_INDICATOR)
+        if flags & CIF0Flags.CIF1_ENABLE:
+            cif1_mask = struct.unpack_from(">I", mv, idx)[0]
+            idx += 4
+        if flags & CIF0Flags.CIF2_ENABLE:
+            cif2_mask = struct.unpack_from(">I", mv, idx)[0]
+            idx += 4
+        if flags & CIF0Flags.CIF3_ENABLE:
+            cif3_mask = struct.unpack_from(">I", mv, idx)[0]
+            idx += 4
         if flags & CIF0Flags.REFERENCE_POINT_IDENTIFIER:
             f.reference_point_identifier = struct.unpack_from(">I", mv, idx)[0]
             idx += 4
@@ -924,26 +933,14 @@ class CIF0Fields:
             f.context_association_lists = cal
             idx += consumed * 4
         if flags & CIF0Flags.CIF1_ENABLE:
-            if idx + 4 > len(mv):
-                raise ValueError("Truncated CIF1 mask")
-            cif1_mask = struct.unpack_from(">I", mv, idx)[0]
-            idx += 4
             cif1_fields, cif1_used_words = CIF1Fields.parse_from_mask(cif1_mask, mv[idx:])
             f.cif1 = cif1_fields
             idx += cif1_used_words * 4
         if flags & CIF0Flags.CIF2_ENABLE:
-            if idx + 4 > len(mv):
-                raise ValueError("Truncated CIF2 mask")
-            cif2_mask = struct.unpack_from(">I", mv, idx)[0]
-            idx += 4
             cif2_fields, cif2_used_words = CIF2Fields.parse_from_mask(cif2_mask, mv[idx:])
             f.cif2 = cif2_fields
             idx += cif2_used_words * 4
         if flags & CIF0Flags.CIF3_ENABLE:
-            if idx + 4 > len(mv):
-                raise ValueError("Truncated CIF3 mask")
-            cif3_mask = struct.unpack_from(">I", mv, idx)[0]
-            idx += 4
             cif3_fields, cif3_used_words = CIF3Fields.parse_from_mask(cif3_mask, mv[idx:])
             f.cif3 = cif3_fields
             idx += cif3_used_words * 4
