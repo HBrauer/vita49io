@@ -16,6 +16,8 @@ from vita49io import (
     PacketType,
     SectorStepRecord,
     SectorStepScanField,
+    IndexListField,
+    IndexListEntrySize,
     SpectrumField,
     SpectrumType,
     AveragingType,
@@ -147,7 +149,7 @@ def test_spectrum_field_pack_parse_roundtrip():
         resolution_hz=50.0,
         span_hz=200_000.0,
         number_of_averages=4,
-        weighting_factor=0.5,
+        weighting_factor=0x3F000000,  # 0.5 as IEEE754 bits
         f1_index=-1024,
         f2_index=1023,
         window_time_delta=12.5,
@@ -169,7 +171,7 @@ def test_spectrum_field_pack_parse_roundtrip():
     assert parsed_spec.f2_index == 1023
     assert pytest.approx(parsed_spec.resolution_hz, rel=1e-6) == 50.0
     assert pytest.approx(parsed_spec.span_hz, rel=1e-6) == 200_000.0
-    assert pytest.approx(parsed_spec.weighting_factor, rel=1e-6) == 0.5
+    assert parsed_spec.weighting_factor == 0x3F000000
     assert pytest.approx(parsed_spec.window_time_delta, rel=1e-6) == 12.5
 
 
@@ -184,7 +186,7 @@ def test_context_packet_with_cif1_spectrum():
         resolution_hz=25.0,
         span_hz=100_000.0,
         number_of_averages=2,
-        weighting_factor=0.25,
+        weighting_factor=0x3E800000,  # 0.25
         f1_index=0,
         f2_index=2047,
         window_time_delta=256,
@@ -220,7 +222,7 @@ def test_cif1_external_decoder_masks_and_lengths(tmp_path: Path):
         resolution_hz=10.0,
         span_hz=1000.0,
         number_of_averages=5,
-        weighting_factor=0.25,
+        weighting_factor=0x3E800000,  # 0.25
         f1_index=0,
         f2_index=10,
         window_time_delta=128,
@@ -235,7 +237,7 @@ def test_cif1_external_decoder_masks_and_lengths(tmp_path: Path):
         resolution_hz=5.0,
         span_hz=2500.0,
         number_of_averages=3,
-        weighting_factor=0.75,
+        weighting_factor=0x3F400000,  # 0.75
         f1_index=-12,
         f2_index=12,
         window_time_delta=250,
@@ -297,7 +299,7 @@ def test_spectrum_window_time_delta_variants(interpretation, value, expect):
         resolution_hz=1.0,
         span_hz=10.0,
         number_of_averages=1,
-        weighting_factor=1.0,
+        weighting_factor=0x3F800000,  # 1.0
         f1_index=0,
         f2_index=10,
         window_time_delta=value,
@@ -324,12 +326,12 @@ def test_spectrum_unknown_type_and_averaging_bits_roundtrip():
         window_type=7,
         num_transform_points=128,
         num_window_points=128,
-        resolution_hz=2.5,
-        span_hz=320.0,
-        number_of_averages=3,
-        weighting_factor=0.75,
-        f1_index=-5,
-        f2_index=5,
+    resolution_hz=2.5,
+    span_hz=320.0,
+    number_of_averages=3,
+    weighting_factor=0x3F400000,  # 0.75
+    f1_index=-5,
+    f2_index=5,
         window_time_delta=42,
     )
     cif1 = CIF1Fields(spectrum=spectrum)
@@ -346,6 +348,33 @@ def test_cif1_parse_rejects_unsupported_bits():
     for mask in (int(CIF1Flags.SPECTRUM) | (1 << 8), int(CIF1Flags.ARRAY_OF_CIF)):
         with pytest.raises(ValueError):
             CIF1Fields.parse_from_mask(mask, b"")
+
+
+def test_index_list_pack_parse_roundtrip():
+    index_list = IndexListField(entries=[1, 2, 3, 4, 5])
+    cif1 = CIF1Fields(index_list=index_list)
+    mask = cif1._presence_mask()
+    assert mask == int(CIF1Flags.INDEX_LIST)
+
+    raw = cif1.pack()
+    words = _payload_bytes_to_words(raw)
+    parsed, used = CIF1Fields.parse_from_mask(mask, raw)
+    assert used == len(words)
+    parsed_index = parsed.index_list
+    assert parsed_index is not None
+    assert parsed_index.entry_size == IndexListEntrySize.SIZE_8
+    assert parsed_index.entries == [1, 2, 3, 4, 5]
+
+
+def test_index_list_explicit_16bit_entries():
+    entries = [0x1234, 0x5678, 0x9ABC]
+    index_list = IndexListField(entries=entries, entry_size=IndexListEntrySize.SIZE_16)
+    cif1 = CIF1Fields(index_list=index_list)
+    parsed, _ = CIF1Fields.parse_from_mask(cif1._presence_mask(), cif1.pack())
+    parsed_index = parsed.index_list
+    assert parsed_index is not None
+    assert parsed_index.entry_size == IndexListEntrySize.SIZE_16
+    assert parsed_index.entries == entries
 
 
 def test_cif1_array_of_cif_fields_is_rejected():
@@ -377,7 +406,7 @@ def test_cif1_additional_fields_roundtrip():
         aux_frequency_hz=1_000_000.25,
         aux_gain_db=(2.0, -1.5),
         aux_bandwidth_hz=200_000.0,
-        attributes=0xA5A5A5A5,
+        index_list=IndexListField(entries=[1, 3, 5, 7]),
         discrete_io_32=0xDEADBEEF,
         discrete_io_64=0x123456789ABCDEF0,
         health_status=0x1234,
@@ -400,7 +429,8 @@ def test_cif1_additional_fields_roundtrip():
     assert parsed.aux_frequency_hz == pytest.approx(1_000_000.25)
     assert parsed.aux_gain_db == pytest.approx((2.0, -1.5))
     assert parsed.aux_bandwidth_hz == pytest.approx(200_000.0)
-    assert parsed.attributes == 0xA5A5A5A5
+    assert parsed.index_list is not None
+    assert parsed.index_list.entries == [1, 3, 5, 7]
     assert parsed.discrete_io_32 == 0xDEADBEEF
     assert parsed.discrete_io_64 == 0x123456789ABCDEF0
     assert parsed.health_status == 0x1234

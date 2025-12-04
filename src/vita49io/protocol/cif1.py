@@ -62,7 +62,7 @@ class CIF1Flags(IntFlag):
     ARRAY_OF_CIF = 1 << 11
     SPECTRUM = 1 << 10
     SECTOR_STEP_SCAN = 1 << 9
-    ATTRIBUTES = 1 << 7
+    INDEX_LIST = 1 << 7
     DISCRETE_IO_32 = 1 << 6
     DISCRETE_IO_64 = 1 << 5
     HEALTH_STATUS = 1 << 4
@@ -552,9 +552,151 @@ class ArrayOfCifFields:
         )
 
 
+class IndexListEntrySize(IntEnum):
+    """Entry size encoding for Index List entries (Table 9.3.2-1)."""
+
+    SIZE_8 = 0b0001
+    SIZE_16 = 0b0010
+    SIZE_32 = 0b0100
+
+    @property
+    def bits(self) -> int:
+        return {self.SIZE_8: 8, self.SIZE_16: 16, self.SIZE_32: 32}[self]
+
+
+@dataclass
+class IndexListField:
+    """Represent the CIF1 Index List field (Section 9.3.2)."""
+
+    entries: List[int]
+    entry_size: IndexListEntrySize | None = None
+
+    def _determine_entry_size(self) -> IndexListEntrySize:
+        if self.entry_size is not None:
+            return IndexListEntrySize(self.entry_size)
+        max_val = max(self.entries) if self.entries else 0
+        if max_val <= 0xFF:
+            return IndexListEntrySize.SIZE_8
+        if max_val <= 0xFFFF:
+            return IndexListEntrySize.SIZE_16
+        return IndexListEntrySize.SIZE_32
+
+    def _validate_entries(self, size: IndexListEntrySize) -> None:
+        limit = {IndexListEntrySize.SIZE_8: 0xFF, IndexListEntrySize.SIZE_16: 0xFFFF, IndexListEntrySize.SIZE_32: 0xFFFFFFFF}[
+            size
+        ]
+        for v in self.entries:
+            if v < 0 or v > limit:
+                raise ValueError(f"Index entry {v} does not fit in {size.bits}-bit width")
+
+    def pack_words(self) -> List[int]:
+        entry_size = self._determine_entry_size()
+        self._validate_entries(entry_size)
+
+        num_entries = len(self.entries)
+        if num_entries > 0xFFFFF:
+            raise ValueError("Index List supports at most 1,048,575 entries")
+
+        entries_per_word = {IndexListEntrySize.SIZE_8: 4, IndexListEntrySize.SIZE_16: 2, IndexListEntrySize.SIZE_32: 1}[
+            entry_size
+        ]
+        payload_words = (num_entries + entries_per_word - 1) // entries_per_word
+        size_of_field = 2 + payload_words
+
+        header_word = (int(entry_size) << 28) | (num_entries & 0xFFFFF)
+        words: List[int] = [_u32(size_of_field), _u32(header_word)]
+
+        if entry_size is IndexListEntrySize.SIZE_32:
+            words.extend(_u32(v) for v in self.entries)
+        elif entry_size is IndexListEntrySize.SIZE_16:
+            for i in range(0, num_entries, 2):
+                hi = self.entries[i]
+                lo = self.entries[i + 1] if i + 1 < num_entries else 0
+                words.append(_u32(((hi & 0xFFFF) << 16) | (lo & 0xFFFF)))
+        elif entry_size is IndexListEntrySize.SIZE_8:
+            for i in range(0, num_entries, 4):
+                chunk = self.entries[i : i + 4]
+                while len(chunk) < 4:
+                    chunk.append(0)
+                word = (
+                    ((chunk[0] & 0xFF) << 24)
+                    | ((chunk[1] & 0xFF) << 16)
+                    | ((chunk[2] & 0xFF) << 8)
+                    | (chunk[3] & 0xFF)
+                )
+                words.append(_u32(word))
+        else:
+            raise ValueError("Unsupported Index List entry size")
+
+        return words
+
+    @staticmethod
+    def parse(words: Sequence[int]) -> Tuple["IndexListField", int]:
+        if len(words) < 2:
+            raise ValueError("Truncated Index List field header")
+
+        size_of_field = words[0]
+        header_word = words[1]
+        if size_of_field < 2:
+            raise ValueError("Invalid Index List field size")
+        if len(words) < size_of_field:
+            raise ValueError("Truncated Index List field")
+
+        entry_size_code = (header_word >> 28) & 0xF
+        num_entries = header_word & 0xFFFFF
+        reserved = (header_word >> 20) & 0xFF
+        if reserved:
+            raise ValueError("Reserved bits set in Index List header")
+
+        try:
+            entry_size = IndexListEntrySize(entry_size_code)
+        except ValueError as exc:
+            raise ValueError("Unsupported Index List entry size encoding") from exc
+
+        entries_per_word = {IndexListEntrySize.SIZE_8: 4, IndexListEntrySize.SIZE_16: 2, IndexListEntrySize.SIZE_32: 1}[
+            entry_size
+        ]
+        expected_payload_words = (num_entries + entries_per_word - 1) // entries_per_word
+        payload_words = size_of_field - 2
+        if payload_words < expected_payload_words:
+            raise ValueError("Truncated Index List entries")
+
+        entries: List[int] = []
+        payload = words[2 : 2 + expected_payload_words]
+
+        if entry_size is IndexListEntrySize.SIZE_32:
+            entries.extend(payload[:num_entries])
+        elif entry_size is IndexListEntrySize.SIZE_16:
+            for word in payload:
+                if len(entries) >= num_entries:
+                    break
+                entries.append((word >> 16) & 0xFFFF)
+                if len(entries) >= num_entries:
+                    break
+                entries.append(word & 0xFFFF)
+        elif entry_size is IndexListEntrySize.SIZE_8:
+            for word in payload:
+                if len(entries) >= num_entries:
+                    break
+                entries.append((word >> 24) & 0xFF)
+                if len(entries) >= num_entries:
+                    break
+                entries.append((word >> 16) & 0xFF)
+                if len(entries) >= num_entries:
+                    break
+                entries.append((word >> 8) & 0xFF)
+                if len(entries) >= num_entries:
+                    break
+                entries.append(word & 0xFF)
+        else:
+            raise ValueError("Unsupported Index List entry size")
+
+        return IndexListField(entries=entries, entry_size=entry_size), size_of_field
+
+
 @dataclass
 class SpectrumField:
-    """Represent the CIF1 Spectrum field (fixed 13-word structure)."""
+    """9.6.1 Spectrum Field. The spectrum field is a multi-word field that describes control or context for spectral information;  (fixed 13-word structure)."""
 
     spectrum_type: Union[SpectrumType, int] # Union because of possible user defined values
     averaging_type: Union[AveragingType, int] # Union because of possible user defined values
@@ -565,7 +707,7 @@ class SpectrumField:
     resolution_hz: float
     span_hz: float
     number_of_averages: int
-    weighting_factor: float
+    weighting_factor: int
     f1_index: int
     f2_index: int
     window_time_delta: Union[int, float]
@@ -581,8 +723,6 @@ class SpectrumField:
 
         res_hi, res_lo = _to_s64_fixed20(self.resolution_hz)
         span_hi, span_lo = _to_s64_fixed20(self.span_hz)
-        weight_word = struct.unpack(">I", struct.pack(">f", float(self.weighting_factor)))[0]
-
         words = [
             _u32(w0),
             _u32(self.window_type),
@@ -593,7 +733,7 @@ class SpectrumField:
             _u32(span_hi),
             _u32(span_lo),
             _u32(self.number_of_averages),
-            _u32(weight_word),
+            _u32(self.weighting_factor),
             _encode_signed_32(self.f1_index),
             _encode_signed_32(self.f2_index),
             _pack_window_time_delta(self.window_time_delta, self.window_time_delta_interpretation),
@@ -628,8 +768,7 @@ class SpectrumField:
         resolution_hz = _from_s64_fixed20(words[4], words[5])
         span_hz = _from_s64_fixed20(words[6], words[7])
         num_avgs = words[8] & 0xFFFFFFFF
-        weight_word = words[9] & 0xFFFFFFFF
-        weighting_factor = struct.unpack(">f", struct.pack(">I", weight_word))[0]
+        weighting_factor = words[9] & 0xFFFFFFFF
         f1 = _decode_signed_32(words[10])
         f2 = _decode_signed_32(words[11])
         window_delta = _parse_window_time_delta(words[12], interpretation)
@@ -680,7 +819,7 @@ class CIF1Fields:
     # Bit 9
     sector_step_scan: SectorStepScanField | None = None
     # Bit 7
-    attributes: int | None = None
+    index_list: IndexListField | None = None
     # Bits 6/5
     discrete_io_32: int | None = None
     discrete_io_64: int | None = None
@@ -705,7 +844,7 @@ class CIF1Fields:
         | CIF1Flags.AUX_BANDWIDTH
         | CIF1Flags.SPECTRUM
         | CIF1Flags.SECTOR_STEP_SCAN
-        | CIF1Flags.ATTRIBUTES
+        | CIF1Flags.INDEX_LIST
         | CIF1Flags.DISCRETE_IO_32
         | CIF1Flags.DISCRETE_IO_64
         | CIF1Flags.HEALTH_STATUS
@@ -740,8 +879,8 @@ class CIF1Fields:
             m |= CIF1Flags.SPECTRUM
         if self.sector_step_scan is not None:
             m |= CIF1Flags.SECTOR_STEP_SCAN
-        if self.attributes is not None:
-            m |= CIF1Flags.ATTRIBUTES
+        if self.index_list is not None:
+            m |= CIF1Flags.INDEX_LIST
         if self.discrete_io_32 is not None:
             m |= CIF1Flags.DISCRETE_IO_32
         if self.discrete_io_64 is not None:
@@ -785,8 +924,8 @@ class CIF1Fields:
             words.extend(self.spectrum.pack_words())
         if self.sector_step_scan is not None:
             words.extend(self.sector_step_scan.pack_words())
-        if self.attributes is not None:
-            words.append(_u32(self.attributes))
+        if self.index_list is not None:
+            words.extend(self.index_list.pack_words())
         if self.discrete_io_32 is not None:
             words.append(_u32(self.discrete_io_32))
         if self.discrete_io_64 is not None:
@@ -832,7 +971,7 @@ class CIF1Fields:
         aux_bw: float | None = None
         spectrum: SpectrumField | None = None
         sector_field: SectorStepScanField | None = None
-        attributes: int | None = None
+        index_list: IndexListField | None = None
         dio32: int | None = None
         dio64: int | None = None
         health: int | None = None
@@ -892,8 +1031,10 @@ class CIF1Fields:
             remaining_words = [struct.unpack_from(">I", mv, offset)[0] for offset in range(idx, len(mv), 4)]
             sector_field, consumed = SectorStepScanField.parse(remaining_words)
             idx += consumed * 4
-        if flags & CIF1Flags.ATTRIBUTES:
-            attributes = take_word()
+        if flags & CIF1Flags.INDEX_LIST:
+            remaining_words = [struct.unpack_from(">I", mv, offset)[0] for offset in range(idx, len(mv), 4)]
+            index_list, consumed = IndexListField.parse(remaining_words)
+            idx += consumed * 4
         if flags & CIF1Flags.DISCRETE_IO_32:
             dio32 = take_word()
         if flags & CIF1Flags.DISCRETE_IO_64:
@@ -925,7 +1066,7 @@ class CIF1Fields:
             aux_bandwidth_hz=aux_bw,
             spectrum=spectrum,
             sector_step_scan=sector_field,
-            attributes=attributes,
+            index_list=index_list,
             discrete_io_32=dio32,
             discrete_io_64=dio64,
             health_status=health,
@@ -947,6 +1088,8 @@ __all__ = [
     "SectorStepRecord",
     "SectorStepScanField",
     "ArrayOfCifFields",
+    "IndexListField",
+    "IndexListEntrySize",
     "BufferSizeField",
     "BuildInformation",
 ]
