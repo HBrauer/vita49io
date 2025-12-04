@@ -109,7 +109,7 @@ class CIF0Flags(IntFlag):
     TEMPERATURE = 1 << 18
     DEVICE_IDENTIFIER = 1 << 17
     STATE_EVENT_INDICATORS = 1 << 16
-    DATA_PACKET_PAYLOAD_FORMAT = 1 << 15
+    PAYLOAD_FORMAT = 1 << 15
     FORMATTED_GPS_GEOLOCATION = 1 << 14
     FORMATTED_INS_GEOLOCATION = 1 << 13
     ECEF_EPHEMERIS = 1 << 12
@@ -555,7 +555,6 @@ class CIF0Fields:
         temperature_c (Optional[int]): Temperature in Celsius (signed).
         device_identifier (Optional[Tuple[int, int]]): Device identifier (OUI, device).
         state_event_indicators (Optional[int]): State and event indicator bits.
-        data_packet_payload_format (Optional[Tuple[int, int]]): Raw payload format words.
         payload_format (Optional[PayloadFormat]): Parsed payload format helper.
 
     Examples:
@@ -592,9 +591,7 @@ class CIF0Fields:
     # Bit 16 (1 word u32)
     state_event_indicators: int | None = None
     # Bit 15 (2 words payload format)
-    data_packet_payload_format: Tuple[int, int] | None = None
-    # Decoded helper (not part of on-wire format). If provided when packing
-    # and raw tuple is None, it will be used to generate the two words.
+    # Payload format (two-word payload)
     payload_format: PayloadFormat | None = None
 
     # Bit 14 (multi-word formatted GPS geolocation)
@@ -659,8 +656,8 @@ class CIF0Fields:
             mask |= CIF0Flags.DEVICE_IDENTIFIER
         if self.state_event_indicators is not None:
             mask |= CIF0Flags.STATE_EVENT_INDICATORS
-        if self.data_packet_payload_format is not None:
-            mask |= CIF0Flags.DATA_PACKET_PAYLOAD_FORMAT
+        if self.payload_format is not None:
+            mask |= CIF0Flags.PAYLOAD_FORMAT
         if self.formatted_gps_geolocation is not None:
             mask |= CIF0Flags.FORMATTED_GPS_GEOLOCATION
         if self.formatted_ins_geolocation is not None:
@@ -746,11 +743,8 @@ class CIF0Fields:
                 words.extend([_u32(oui & 0xFFFFFF), _u32(dev)])
         if self.state_event_indicators is not None:
             words.append(_u32(self.state_event_indicators))
-        if self.data_packet_payload_format is not None or self.payload_format is not None:
-            if self.data_packet_payload_format is not None:
-                w0, w1 = self.data_packet_payload_format
-            else:
-                w0, w1 = self.payload_format.pack_words()  # type: ignore[union-attr]
+        if self.payload_format is not None:
+            w0, w1 = self.payload_format.pack_words()
             words.extend([_u32(w0), _u32(w1)])
         if self.formatted_gps_geolocation is not None:
             words.extend(self.formatted_gps_geolocation.pack_words())
@@ -888,14 +882,9 @@ class CIF0Fields:
         if flags & CIF0Flags.STATE_EVENT_INDICATORS:
             f.state_event_indicators = struct.unpack_from(">I", mv, idx)[0]
             idx += 4
-        if flags & CIF0Flags.DATA_PACKET_PAYLOAD_FORMAT:
+        if flags & CIF0Flags.PAYLOAD_FORMAT:
             w0, w1 = struct.unpack_from(">II", mv, idx)
-            f.data_packet_payload_format = (w0, w1)
-            # Also provide a decoded, user-friendly view
-            try:
-                f.payload_format = PayloadFormat.parse(w0, w1)
-            except Exception:
-                f.payload_format = None
+            f.payload_format = PayloadFormat.parse(w0, w1)
             idx += 8
         if flags & CIF0Flags.FORMATTED_GPS_GEOLOCATION:
             segment = struct.unpack_from(f">{FormattedGeolocation.NUM_WORDS}I", mv, idx)

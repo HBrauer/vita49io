@@ -342,7 +342,6 @@ class IQStreamWriter:
         integer_seconds, fractional_seconds = self.current_time()
 
         # Build CIF0 fields
-        pf_w0, pf_w1 = self.payload_format.pack_words()  # type: ignore[union-attr]
         cif0 = CIF0Fields(
             context_field_change_indicator=False,
             bandwidth_hz=self.bandwidth_hz,
@@ -355,7 +354,6 @@ class IQStreamWriter:
             sample_rate_hz=self.sample_rate_hz,
             device_identifier=self.device_identifier,
             state_event_indicators=self.state_event_indicators,
-            data_packet_payload_format=(pf_w0, pf_w1),
             payload_format=self.payload_format,
         )
 

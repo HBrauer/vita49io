@@ -73,7 +73,6 @@ def main(argv: list[str]) -> int:
         sample_rate_hz=sample_rate_hz,
         bandwidth_hz=sample_rate_hz / 2,
         payload_format=payload_format,
-        data_packet_payload_format=payload_format.pack_words(),
     )
     ctx = ContextPacket(
         header=ctx_header,

@@ -37,8 +37,6 @@ class TestProcessingEfficientFile(unittest.TestCase):
 
         stream_id = 0x91A2B3C4
 
-        pf_w0, pf_w1 = payload_format.pack_words()
-
         context_packet = ContextPacket(
             packet_type=PacketType.CONTEXT_PACKET,
             stream_id=stream_id,
@@ -46,7 +44,6 @@ class TestProcessingEfficientFile(unittest.TestCase):
             tsf=TSF.NONE,
             cif0=CIF0Fields(
                 payload_format=payload_format,
-                data_packet_payload_format=(pf_w0, pf_w1),
             ),
         )
 

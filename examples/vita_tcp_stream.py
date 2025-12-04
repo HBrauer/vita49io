@@ -137,11 +137,6 @@ def _extract_payload_format(ctx: ContextPacket) -> Optional[PayloadFormat]:
         return None
     if cif0.payload_format is not None:
         return cif0.payload_format
-    if cif0.data_packet_payload_format is not None:
-        try:
-            return PayloadFormat.parse(*cif0.data_packet_payload_format)
-        except Exception:
-            return None
     return None
 
 
