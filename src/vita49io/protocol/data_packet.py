@@ -29,29 +29,6 @@ from .vrt_types import ClassID
 from .cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
 
 
-_DEFAULT_REFERENCE_IMPEDANCE_OHMS = 50.0
-
-
-def _reflevel_dbm_to_vpk(reference_level_dbm: float) -> float:
-    # Convert power in dBm to power in watts
-    power_w = 10.0 ** ((float(reference_level_dbm) - 30.0) / 10.0)
-    return float(np.sqrt(2.0 * _DEFAULT_REFERENCE_IMPEDANCE_OHMS * power_w))
-
-
-def _normalize_iq_to_reference_level(
-    iq: "np.ndarray",
-    reference_level_dbm: float,
-) -> "np.ndarray":
-    ref_dbm = float(reference_level_dbm)
-    if not np.isfinite(ref_dbm):
-        raise ValueError("reference_level_dbm must be finite")
-    vpk = _reflevel_dbm_to_vpk(ref_dbm)
-    if not np.isfinite(vpk) or vpk <= 0.0:
-        raise ValueError("Computed peak voltage must be finite and positive")
-    scale = vpk
-    return np.asarray(iq) * scale
-
-
 @dataclass(init=False, slots=True)
 class DataPacket(LazyBinary):
     """Represent a VITA 49 data packet with lazy payload/IQ decoding."""
@@ -322,8 +299,6 @@ class DataPacket(LazyBinary):
     def to_bytes(
         self,
         payload_format: PayloadFormat | None = None,
-        *,
-        reference_level_dbm: float | None = None,
     ) -> bytes:
         if not self._dirty and self._mv is not None:
             return self._mv.tobytes()
@@ -353,13 +328,6 @@ class DataPacket(LazyBinary):
             raise ValueError("Packet type requires a trailer, but none provided")
 
         pf = payload_format or self._payload_format
-        if reference_level_dbm is not None:
-            if pf is None:
-                raise ValueError("reference_level_dbm requires payload_format when encoding IQ data")
-            if self.iq is None:
-                raise ValueError(
-                    "reference_level_dbm provided but packet was constructed without IQ samples"
-                )
 
         common = _Common(
             header=hdr,
@@ -372,8 +340,6 @@ class DataPacket(LazyBinary):
 
         if self.iq is not None and pf is not None:
             iq_values = self.iq
-            if reference_level_dbm is not None and reference_level_dbm != 0.0:
-                iq_values = _normalize_iq_to_reference_level(iq_values, reference_level_dbm)
             payload_bytes: Union[bytes, memoryview] = _encode_iq_payload(iq_values, pf)
         else:
             payload_bytes = self.payload
