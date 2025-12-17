@@ -262,6 +262,14 @@ class DataPacket(LazyBinary):
         self._iq = value
         self._mark_dirty()
 
+    @property
+    def iq_raw(self) -> "np.ndarray | None":
+        if self._payload_format is None:
+            return None
+        pay = self.payload
+        pay_view = pay if isinstance(pay, memoryview) else memoryview(pay)
+        return _view_iq_payload(pay_view, self._payload_format)
+
     def __repr__(self) -> str:  # pragma: no cover - human-facing formatting
         def _hex32(v: int) -> str:
             return f"0x{v & 0xFFFFFFFF:08X}"
@@ -359,7 +367,6 @@ class DataPacket(LazyBinary):
         data: Union[bytes, bytearray, memoryview],
         payload_format: PayloadFormat | None = None,
         *,
-        decode_iq: bool = True,
         copy_payload: bool = False,
     ) -> "DataPacket":
         """
@@ -485,6 +492,37 @@ def _decode_iq_payload(payload: bytes, pf: PayloadFormat) -> "np.ndarray":
         raise ValueError("Payload does not contain an even number of components for I/Q")
     vec = vals.reshape(-1, 2)
     return (vec[:, 0] + 1j * vec[:, 1]).astype(np.complex64)
+
+
+def _view_iq_payload(payload: Union[bytes, memoryview], pf: PayloadFormat) -> "np.ndarray":
+
+    ipf, di, fmt = _validate_supported(pf)
+    if ipf == 32 and di == 16:
+        dtype = ">i2" if fmt == DataItemFormat.SIGNED_FIXED_POINT else ">u2"
+        # 32-bit fields store the data item in the lower 16 bits (big-endian).
+        vals16 = np.frombuffer(payload, dtype=dtype)[1::2]
+        if vals16.size % 2 != 0:
+            raise ValueError("Payload does not contain an even number of components for I/Q")
+        return vals16.reshape(-1, 2)
+
+    if ipf != di or ipf not in (16, 32):
+        raise ValueError(
+            "Native IQ view requires full-width 16- or 32-bit data items "
+            "(item_packing_field_size_bits == data_item_size_bits), "
+            "except 16-in-32 fixed-point which returns the lower 16 bits."
+        )
+
+    if fmt == DataItemFormat.IEEE754_SINGLE:
+        dtype = ">f4"
+    elif fmt == DataItemFormat.SIGNED_FIXED_POINT:
+        dtype = ">i2" if ipf == 16 else ">i4"
+    else:  # UNSIGNED_FIXED_POINT
+        dtype = ">u2" if ipf == 16 else ">u4"
+
+    vals = np.frombuffer(payload, dtype=dtype)
+    if vals.size % 2 != 0:
+        raise ValueError("Payload does not contain an even number of components for I/Q")
+    return vals.reshape(-1, 2)
 
 
 def _encode_iq_payload(iq: "np.ndarray", pf: PayloadFormat) -> bytes:
