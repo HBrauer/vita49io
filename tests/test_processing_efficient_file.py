@@ -70,7 +70,7 @@ class TestProcessingEfficientFile(unittest.TestCase):
             stream_id=stream_id,
             tsi=TSI.NONE,
             tsf=TSF.NONE,
-            iq=expected_iq,
+            data_float32=expected_iq,
             packet_count=1,
         )
 
@@ -120,8 +120,8 @@ class TestProcessingEfficientFile(unittest.TestCase):
                             packet_bytes,
                             payload_format=last_payload_format,
                         )
-                        self.assertIsNotNone(data.iq)
-                        decoded_iq = data.iq
+                        self.assertIsNotNone(data.data_float32)
+                        decoded_iq = data.data_float32
 
             self.assertIsNotNone(decoded_iq, "No data packet decoded from test file")
             iq_array = decoded_iq

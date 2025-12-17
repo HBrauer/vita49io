@@ -1,10 +1,10 @@
-"""Implement VITA 49 data packet helpers for encoding and decoding IQ payloads.
+"""Implement VITA 49 data packet helpers for encoding and decoding sample payloads.
 
 Packets follow a lazy, memoryview-backed design:
 
 * ``from_bytes`` keeps a ``memoryview`` of the raw packet and defers decoding.
 * ``to_bytes`` fast-paths to the stored bytes when the packet was not mutated.
-* IQ/payload are decoded only when accessed.
+* Sample data/payload are decoded only when accessed.
 """
 
 from __future__ import annotations
@@ -31,7 +31,11 @@ from .cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
 
 @dataclass(init=False, slots=True)
 class DataPacket(LazyBinary):
-    """Represent a VITA 49 data packet with lazy payload/IQ decoding."""
+    """Represent a VITA 49 data packet with lazy payload/sample decoding.
+
+    - `data` exposes a zero-copy view of the raw payload in on-wire dtype/endianness.
+    - `data_float32` returns decoded float32/complex64 samples when a payload_format is set.
+    """
 
     _header: Header | None = None
     _stream_id: int | None = None
@@ -40,7 +44,7 @@ class DataPacket(LazyBinary):
     _fractional_seconds: int | None = None
     _payload: Union[bytes, memoryview, None] = None
     _trailer: int | None = None
-    _iq: "np.ndarray | None" = None
+    _data_float32: "np.ndarray | None" = None
     _payload_format: PayloadFormat | None = None
     _copy_payload: bool = False
     validate_strict: bool = False
@@ -59,7 +63,7 @@ class DataPacket(LazyBinary):
         fractional_seconds: int | None = None,
         payload: Union[bytes, memoryview, None] = None,
         trailer: int | None = None,
-        iq: "np.ndarray | None" = None,
+        data_float32: "np.ndarray | None" = None,
         payload_format: PayloadFormat | None = None,
         validate_strict: bool = False,
         requiresVita49_2: bool = False,
@@ -89,7 +93,7 @@ class DataPacket(LazyBinary):
         self._fractional_seconds = fractional_seconds
         self._payload = payload if _mv is None else payload
         self._trailer = trailer
-        self._iq = iq
+        self._data_float32 = data_float32
         self._payload_format = payload_format
         self._copy_payload = copy_payload
         self.validate_strict = validate_strict
@@ -247,28 +251,33 @@ class DataPacket(LazyBinary):
         self._mark_dirty()
 
     @property
-    def iq(self) -> "np.ndarray | None":
-        if self._iq is not None:
-            return self._iq
+    def data_float32(self) -> "np.ndarray | None":
+        """Return decoded samples as float32/complex64 when payload_format is set.
+
+        Currently supports complex Cartesian I/Q; real sample support can be added later.
+        """
+        if self._data_float32 is not None:
+            return self._data_float32
         if self._payload_format is None:
             return None
         pay = self.payload
         pay_bytes = pay.tobytes() if isinstance(pay, memoryview) else pay
-        self._iq = _decode_iq_payload(pay_bytes, self._payload_format)
-        return self._iq
+        self._data_float32 = _decode_sample_payload(pay_bytes, self._payload_format)
+        return self._data_float32
 
-    @iq.setter
-    def iq(self, value: "np.ndarray | None") -> None:
-        self._iq = value
+    @data_float32.setter
+    def data_float32(self, value: "np.ndarray | None") -> None:
+        self._data_float32 = value
         self._mark_dirty()
 
     @property
-    def iq_raw(self) -> "np.ndarray | None":
+    def data(self) -> "np.ndarray | None":
+        """Return a raw payload view in the native on-wire dtype/endianness."""
         if self._payload_format is None:
             return None
         pay = self.payload
         pay_view = pay if isinstance(pay, memoryview) else memoryview(pay)
-        return _view_iq_payload(pay_view, self._payload_format)
+        return _view_sample_payload(pay_view, self._payload_format)
 
     def __repr__(self) -> str:  # pragma: no cover - human-facing formatting
         def _hex32(v: int) -> str:
@@ -297,11 +306,13 @@ class DataPacket(LazyBinary):
         parts.append(f"requiresVita49_2={self.header.indicators_25}")
         if self.header.indicators_24:
             parts.append("indicators_24=True")
-        if self._iq is not None:
+        if self._data_float32 is not None:
             try:
-                parts.append(f"iq_len={int(getattr(self._iq, 'size', len(self._iq)))}")
+                parts.append(
+                    f"data_float32_len={int(getattr(self._data_float32, 'size', len(self._data_float32)))}"
+                )
             except Exception:
-                parts.append("iq_len=?")
+                parts.append("data_float32_len=?")
         return f"DataPacket({', '.join(parts)})"
 
     def to_bytes(
@@ -346,9 +357,9 @@ class DataPacket(LazyBinary):
         )
         words: List[int] = _pack_common_prefix(common)
 
-        if self.iq is not None and pf is not None:
-            iq_values = self.iq
-            payload_bytes: Union[bytes, memoryview] = _encode_iq_payload(iq_values, pf)
+        if self.data_float32 is not None and pf is not None:
+            data_values = self.data_float32
+            payload_bytes: Union[bytes, memoryview] = _encode_sample_payload(data_values, pf)
         else:
             payload_bytes = self.payload
 
@@ -372,8 +383,8 @@ class DataPacket(LazyBinary):
         """
         Construct a DataPacket backed by a memoryview of the raw bytes.
 
-        IQ decoding is deferred; `decode_iq` is accepted for compatibility but
-        `.iq` is decoded lazily when accessed and a payload_format is available.
+        Sample decoding is deferred; `.data_float32` is decoded lazily when accessed
+        and a payload_format is available.
         """
         mv = data if isinstance(data, memoryview) else memoryview(data)
         pkt = cls(_mv=mv, payload_format=payload_format, copy_payload=copy_payload)
@@ -384,7 +395,7 @@ __all__ = ["DataPacket"]
 
 
 # --------------------------
-# Internal helpers (IQ I/O)
+# Internal helpers (sample I/O)
 # --------------------------
 
 
@@ -433,7 +444,7 @@ def _validate_supported(pf: PayloadFormat) -> Tuple[int, int, DataItemFormat]:
     return ipf, di, fmt
 
 
-def _decode_iq_payload(payload: bytes, pf: PayloadFormat) -> "np.ndarray":
+def _decode_sample_payload(payload: bytes, pf: PayloadFormat) -> "np.ndarray":
 
     ipf, di, fmt = _validate_supported(pf)
 
@@ -487,16 +498,20 @@ def _decode_iq_payload(payload: bytes, pf: PayloadFormat) -> "np.ndarray":
         else:
             raise ValueError(f"Internal error: unexpected format in fixed-point decoder: {pf}")
 
-    # Convert interleaved I,Q values to complex
+    # Convert interleaved I/Q components to complex samples.
     if vals.size % 2 != 0:
         raise ValueError("Payload does not contain an even number of components for I/Q")
     vec = vals.reshape(-1, 2)
     return (vec[:, 0] + 1j * vec[:, 1]).astype(np.complex64)
 
 
-def _view_iq_payload(payload: Union[bytes, memoryview], pf: PayloadFormat) -> "np.ndarray":
+def _view_sample_payload(payload: Union[bytes, memoryview], pf: PayloadFormat) -> "np.ndarray":
 
     ipf, di, fmt = _validate_supported(pf)
+    if fmt == DataItemFormat.IEEE754_SINGLE:
+        if len(payload) % 8 != 0:
+            raise ValueError("Payload does not contain an even number of components for I/Q")
+        return np.frombuffer(payload, dtype=">c8")
     if ipf == 32 and di == 16:
         dtype = ">i2" if fmt == DataItemFormat.SIGNED_FIXED_POINT else ">u2"
         # 32-bit fields store the data item in the lower 16 bits (big-endian).
@@ -507,14 +522,12 @@ def _view_iq_payload(payload: Union[bytes, memoryview], pf: PayloadFormat) -> "n
 
     if ipf != di or ipf not in (16, 32):
         raise ValueError(
-            "Native IQ view requires full-width 16- or 32-bit data items "
+            "Native sample view requires full-width 16- or 32-bit data items "
             "(item_packing_field_size_bits == data_item_size_bits), "
             "except 16-in-32 fixed-point which returns the lower 16 bits."
         )
 
-    if fmt == DataItemFormat.IEEE754_SINGLE:
-        dtype = ">f4"
-    elif fmt == DataItemFormat.SIGNED_FIXED_POINT:
+    if fmt == DataItemFormat.SIGNED_FIXED_POINT:
         dtype = ">i2" if ipf == 16 else ">i4"
     else:  # UNSIGNED_FIXED_POINT
         dtype = ">u2" if ipf == 16 else ">u4"
@@ -525,13 +538,12 @@ def _view_iq_payload(payload: Union[bytes, memoryview], pf: PayloadFormat) -> "n
     return vals.reshape(-1, 2)
 
 
-def _encode_iq_payload(iq: "np.ndarray", pf: PayloadFormat) -> bytes:
+def _encode_sample_payload(samples: "np.ndarray", pf: PayloadFormat) -> bytes:
 
     ipf, di, fmt = _validate_supported(pf)
 
-    # Converted input to (N, 2) float32 array of I and Q in order 
-    # to have a consistent starting point for all encoding paths.
-    arr = np.asarray(iq)
+    # Normalize input to (N, 2) float32 I/Q components for encoding paths.
+    arr = np.asarray(samples)
     if arr.dtype.kind == "c":
         I = arr.real.astype(np.float32)
         Q = arr.imag.astype(np.float32)
@@ -539,9 +551,9 @@ def _encode_iq_payload(iq: "np.ndarray", pf: PayloadFormat) -> bytes:
     else:
         vec = arr.astype(np.float32)
         if vec.ndim == 1:
-            raise ValueError("IQ array must be complex or shape (N,2)")
+            raise ValueError("Sample array must be complex or shape (N,2)")
         if vec.shape[-1] != 2:
-            raise ValueError("IQ array last dimension must be 2 (I,Q)")
+            raise ValueError("Sample array last dimension must be 2 (I,Q)")
     vals = vec.reshape(-1).astype(np.float32)
 
     # Fast path: 32-bit fields

@@ -214,9 +214,11 @@ def convert_vita_to_sigmf(
                     packet_index += 1
                     continue
                 pkt = DataPacket.from_bytes(packet_bytes, payload_format=last_payload_format)
-                if pkt.iq is None:
-                    raise RuntimeError(f"Failed to decode IQ payload for data packet at index {packet_index}")
-                iq = np.asarray(pkt.iq, dtype=np.complex64)
+                if pkt.data_float32 is None:
+                    raise RuntimeError(
+                        f"Failed to decode sample payload for data packet at index {packet_index}"
+                    )
+                iq = np.asarray(pkt.data_float32, dtype=np.complex64)
                 if iq.size > 0:
                     out_f.write(iq.astype(dtype_le_c8, copy=False).tobytes())
                     total_samples += int(iq.size)

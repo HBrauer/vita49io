@@ -15,9 +15,9 @@ def _ensure_src_on_path() -> None:
 
 
 def read_packets_with_iq(path: str):
-    """Return an iterable over (iq, sample_rate_hz, timestamp_s) with context metadata.
+    """Return an iterable over (data_float32, sample_rate_hz, timestamp_s) with context metadata.
 
-    - Iteration yields tuples for each DataPacket with decoded IQ.
+    - Iteration yields tuples for each DataPacket with decoded float32/complex64 samples.
     - Attributes on the returned iterable instance (not a bare generator):
         .first_sample_rate_hz
         .first_rf_reference_frequency_hz
@@ -101,13 +101,13 @@ def read_packets_with_iq(path: str):
                         pkt = DataPacket.from_bytes(
                             packet_bytes, payload_format=self._last_payload_format
                         )
-                        if getattr(pkt, "iq", None) is not None:
+                        if pkt.data_float32 is not None:
                             t_s = _pkt_time_s(pkt.integer_seconds, pkt.fractional_seconds)
                             if t_s is not None:
                                 if self.first_timestamp_s is None:
                                     self.first_timestamp_s = t_s
                                 self.last_timestamp_s = t_s
-                            yield pkt.iq, self.first_sample_rate_hz, t_s
+                            yield pkt.data_float32, self.first_sample_rate_hz, t_s
                     else:
                         pass
 
@@ -166,7 +166,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     overlap = min(0.95, max(0.0, float(args.overlap)))
     hop = max(1, int(round(fft_size * (1.0 - overlap))))
 
-    # Accumulate IQ samples (streaming) up to limit
+    # Accumulate samples (streaming) up to limit
     import numpy as np
 
     chunks: list[np.ndarray] = []
@@ -203,7 +203,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
 
     if total == 0:
-        print("No IQ data decoded. Ensure the file contains CIF0 payload format and data packets.")
+        print("No sample data decoded. Ensure the file contains CIF0 payload format and data packets.")
         return 2
 
     x = np.concatenate(chunks) if len(chunks) > 1 else chunks[0]

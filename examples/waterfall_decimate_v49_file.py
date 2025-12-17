@@ -15,9 +15,9 @@ def _ensure_src_on_path() -> None:
 
 
 def read_packets_with_iq(path: str):
-    """Iterate packets and yield (iq, sample_rate_hz, center_hz) for each DataPacket.
+    """Iterate packets and yield (data_float32, sample_rate_hz, center_hz) for each DataPacket.
 
-    Keeps track of the last CIF0 payload format, which enables IQ decoding
+    Keeps track of the last CIF0 payload format, which enables float32/complex64 decoding
     in DataPacket.from_bytes(). Also extracts sample_rate_hz from CIF0 when present.
     """
     from vita49io.protocol.core import Header
@@ -83,8 +83,8 @@ def read_packets_with_iq(path: str):
                 PacketType.EXTENSION_DATA_WITH_STREAM_ID,
             ):
                 pkt = DataPacket.from_bytes(packet_bytes, payload_format=last_payload_format)
-                if getattr(pkt, "iq", None) is not None:
-                    yield pkt.iq, last_sample_rate_hz, last_center_hz
+                if pkt.data_float32 is not None:
+                    yield pkt.data_float32, last_sample_rate_hz, last_center_hz
             else:
                 # Skip unsupported packet types
                 pass
@@ -222,7 +222,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     hop = max(1, int(round(fft_size * (1.0 - overlap))))
     decim = max(1, int(args.decim))
 
-    # Accumulate IQ samples (streaming) up to limit
+    # Accumulate samples (streaming) up to limit
     import numpy as np
 
     chunks: list[np.ndarray] = []
@@ -255,7 +255,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
 
     if total == 0:
-        print("No IQ data decoded. Ensure the file contains CIF0 payload format and data packets.")
+        print("No sample data decoded. Ensure the file contains CIF0 payload format and data packets.")
         return 2
 
     x = np.concatenate(chunks) if len(chunks) > 1 else chunks[0]

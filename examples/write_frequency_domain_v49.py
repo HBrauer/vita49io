@@ -102,7 +102,7 @@ def main(argv: list[str]) -> int:
         stream_id=stream_id,
         integer_seconds=1_700_000_000,
         fractional_seconds=0,
-        iq=spectrum,  # treat frequency bins as complex samples; S-bit marks them spectral
+        data_float32=spectrum,  # treat frequency bins as complex samples; S-bit marks them spectral
     )
     out += data_pkt.to_bytes(payload_format=payload_format)
 

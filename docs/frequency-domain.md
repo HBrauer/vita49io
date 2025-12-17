@@ -122,7 +122,7 @@ data_pkt = DataPacket(
     stream_id=stream_id,
     integer_seconds=1_700_000_000,
     fractional_seconds=0,
-    iq=spectrum,  # complex bins
+    data_float32=spectrum,  # complex bins
 )
 data_bytes = data_pkt.to_bytes(payload_format=pf)
 open("out_spectrum.v49", "wb").write(ctx_bytes + data_bytes)

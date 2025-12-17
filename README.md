@@ -92,7 +92,7 @@ pkt = DataPacket(
 raw = pkt.to_bytes()
 
 # If you know the payload format (e.g., from the last Context packet),
-# pass it to decode IQ back to a complex64 NumPy array.
+# pass it to decode samples back to a complex64 NumPy array.
 from vita49io.protocol.cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
 pf = PayloadFormat(
     packing_method=PackingMethod.PROCESSING_EFFICIENT,
@@ -109,7 +109,7 @@ pf = PayloadFormat(
     vector_size=0,
 )
 same = DataPacket.from_bytes(raw, payload_format=pf)
-iq = same.iq  # complex64 array of shape (2,)
+data_float32 = same.data_float32  # complex64 array of shape (2,)
 ```
 
 Example: create frequency-domain context + data packets
@@ -189,14 +189,15 @@ Notes
 - Data payload bytes must be 32-bit aligned; the library pads to a word boundary as needed.
 - For numeric payloads, use big-endian dtypes (e.g., `">f4"`, `">i2"`) to match VRT network byte order.
 - When you already have encoded bytes, set `payload` and omit `payload_format`.
-- When you want the library to encode/decode IQ, provide `payload_format` and set/use the `iq` field.
+- `data` provides a zero-copy view of the on-wire payload; `data_float32` returns decoded float32/complex64 samples.
+- When you want the library to encode/decode samples, provide `payload_format` and set/use `data_float32`.
 - For frequency-domain Signal Spectral Data, set header bit 24 (`indicators_24=True`) or use `IQStreamWriter(frequency_domain=True)` to raise the S-bit per AV49.2 Rule 6.3.1-2.
 
 
 Read Packets From File
 -------------------------
 
-The examples follow a streaming parser that reads a header, uses `packet_size` to read the full packet, and decodes context/data accordingly. It maintains the last seen `PayloadFormat` from context to decode subsequent data packets into IQ arrays.
+The examples follow a streaming parser that reads a header, uses `packet_size` to read the full packet, and decodes context/data accordingly. It maintains the last seen `PayloadFormat` from context to decode subsequent data packets into float32/complex64 sample arrays.
 
 ```python
 from vita49io.protocol.core import Header
@@ -221,7 +222,7 @@ with open(path, "rb") as f:
             handle(ctx)
         else:
             data = DataPacket.from_bytes(pkt_bytes, payload_format=last_pf)
-            # data.iq is a complex64 NumPy array when last_pf is compatible
+            # data.data_float32 is a complex64 NumPy array when last_pf is compatible
             handle(data)
 ```
 
@@ -246,7 +247,7 @@ w = IQStreamWriter(
 ctx = w.build_context_packet()
 out = bytearray(ctx.to_bytes())
 
-# Emit IQ in blocks; accepts complex or shape (N,2)
+# Emit samples in blocks; accepts complex or shape (N,2)
 tone = 50_000.0
 N = 10_000
 t = np.arange(N, dtype=np.float32) / np.float32(w.sample_rate_hz)
@@ -257,7 +258,7 @@ for i in range(0, N, 1024):
 open("out.v49", "wb").write(out)
 ```
 
-- Time handling: timestamps start at `start_time_epoch_s` (default now, UTC) and advance by `len(iq)/sample_rate_hz` for each packet.
+- Time handling: timestamps start at `start_time_epoch_s` (default now, UTC) and advance by `len(data_float32)/sample_rate_hz` for each packet.
 - Timestamps are emitted using `tsi`/`tsf` (defaults: `UTC` + `FRACTIONAL`).
 - To use fixed-point payloads, build a `PayloadFormat` and pass it to the writer via constructor fields; it propagates to context and data encoding.
 

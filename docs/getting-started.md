@@ -71,7 +71,7 @@ with open(path, "rb") as f:
             handle(ctx)
         else:
             data = DataPacket.from_bytes(pkt_bytes, payload_format=last_pf)
-            # data.iq is a complex64 NumPy array when last_pf is compatible
+            # data.data_float32 is a complex64 NumPy array when last_pf is compatible
             handle(data)
 ```
 
@@ -95,7 +95,7 @@ w = IQStreamWriter(
 ctx = w.build_context_packet()
 out = bytearray(ctx.to_bytes())
 
-# Emit IQ in blocks; accepts complex or shape (N,2)
+# Emit samples in blocks; accepts complex or shape (N,2)
 tone = 50_000.0
 N = 10_000
 t = np.arange(N, dtype=np.float32) / np.float32(w.sample_rate_hz)
@@ -106,7 +106,7 @@ for i in range(0, N, 1024):
 open("out.v49", "wb").write(out)
 ```
 
-- Time handling: timestamps start at `start_time_epoch_s` (default now, UTC) and advance by `len(iq)/sample_rate_hz` for each packet.
+- Time handling: timestamps start at `start_time_epoch_s` (default now, UTC) and advance by `len(data_float32)/sample_rate_hz` for each packet.
 - Timestamps are emitted using `tsi`/`tsf` (defaults: `UTC` + `FRACTIONAL`).
 - To use fixed‑point payloads, build a `PayloadFormat` and pass it to the writer via constructor fields; it propagates to context and data encoding.
 

@@ -243,7 +243,7 @@ class IQStreamWriter:
             >>> from vita49io.io.iq_writer import IQStreamWriter
             >>> writer = IQStreamWriter(stream_id=1, sample_rate_hz=1e6)
             >>> pkt = writer.build_data_packet(np.zeros(4, dtype=np.complex64))
-            >>> pkt.iq.shape[0]
+            >>> pkt.data_float32.shape[0]
             4
         """
         # Determine number of IQ samples
@@ -275,7 +275,7 @@ class IQStreamWriter:
             class_id=self.class_id,
             integer_seconds=integer_seconds if self.tsi != TSI.NONE else None,
             fractional_seconds=fractional_seconds if self.tsf != TSF.NONE else None,
-            iq=arr,
+            data_float32=arr,
         )
 
         # Advance state
