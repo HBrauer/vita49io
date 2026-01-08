@@ -8,3 +8,5 @@ tests/_artifacts/
 src/vita49io.egg-info/
 dist/
 *.v49
+*.pcap
+.env
