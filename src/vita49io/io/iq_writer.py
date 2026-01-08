@@ -68,7 +68,7 @@ class IQStreamWriter:
         sample_component_repeat (bool): Whether components repeat when deriving payload format.
         repeat_count (int): Repeat count used for vector payloads.
         vector_size (int): Vector size for complex payloads.
-        packet_type (PacketType): Packet type used for emitted data packets.
+        data_packet_type (PacketType): Packet type used for emitted data packets.
         tsi (TSI): Timestamp Integer selection for emitted packets.
         tsf (TSF): Timestamp Fractional selection for emitted packets.
         class_id (Optional[ClassID]): Class identifier to attach to packets.
@@ -118,7 +118,7 @@ class IQStreamWriter:
     vector_size: int = 0
 
     # Header/Class/Timing config
-    packet_type: PacketType = PacketType.IF_DATA_WITH_STREAM_ID
+    data_packet_type: PacketType = PacketType.IF_DATA_WITH_STREAM_ID
     tsi: TSI = TSI.UTC
     tsf: TSF = TSF.FRACTIONAL
     class_id: ClassID | None = None
@@ -170,11 +170,11 @@ class IQStreamWriter:
             raise ValueError("stream_id is required")
         if self.sample_rate_hz <= 0:
             raise ValueError("sample_rate_hz must be > 0")
-        if self.packet_type not in (
+        if self.data_packet_type not in (
             PacketType.IF_DATA_WITH_STREAM_ID,
             PacketType.EXTENSION_DATA_WITH_STREAM_ID,
         ):
-            raise ValueError("packet_type must include a Stream ID for IQ data streams")
+            raise ValueError("data_packet_type must include a Stream ID for IQ data streams")
 
         # Resolve payload format if not provided
         if self.payload_format is None:
@@ -259,7 +259,7 @@ class IQStreamWriter:
         integer_seconds, fractional_seconds = self.current_time()
 
         header = Header(
-            packet_type=self.packet_type,
+            packet_type=self.data_packet_type,
             class_id_present=(self.class_id is not None),
             indicators_26=False,
             indicators_25=bool(self.requires_vita49_2),
