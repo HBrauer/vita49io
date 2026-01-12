@@ -9,7 +9,7 @@ class TestCIF0(unittest.TestCase):
         pf = PayloadFormat(
             packing_method=PackingMethod.PROCESSING_EFFICIENT,
             sample_type=SampleType.COMPLEX_CARTESIAN,
-            data_item_format_code=int(DataItemFormat.IEEE754_SINGLE),
+            data_item_format=DataItemFormat.IEEE754_SINGLE,
             sample_component_repeat=False,
             event_tag_size_bits=0,
             channel_tag_size_bits=0,

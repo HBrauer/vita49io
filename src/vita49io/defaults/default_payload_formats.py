@@ -32,7 +32,6 @@ def build_payload_format(
     return PayloadFormat(
         packing_method=packing_method,
         sample_type=sample_type,
-        data_item_format_code=int(data_item_format),
         sample_component_repeat=sample_component_repeat,
         event_tag_size_bits=event_tag_size_bits,
         channel_tag_size_bits=channel_tag_size_bits,

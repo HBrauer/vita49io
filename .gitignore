@@ -1,6 +1,7 @@
 *.pyc
 __pycache__/
 doc/
+vita_doc/
 vita_example_files/
 tests/_artifacts/
 .vscode/

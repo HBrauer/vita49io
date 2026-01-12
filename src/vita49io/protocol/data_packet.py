@@ -417,10 +417,7 @@ def _validate_supported(pf: PayloadFormat) -> Tuple[int, int, DataItemFormat]:
         if pf.repeat_count != 1:
             raise ValueError(f"Unsupported repeat count of {pf.repeat_count}, only 1 is supported")
 
-    try:
-        fmt = DataItemFormat(pf.data_item_format_code)
-    except ValueError as e:
-        raise ValueError(f"Unsupported data item format code: {pf.data_item_format_code}") from e
+    fmt = pf.data_item_format
 
     # Validate combinations
     ipf = pf.item_packing_field_size_bits

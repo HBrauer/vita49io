@@ -181,7 +181,6 @@ class IQStreamWriter:
             self.payload_format = PayloadFormat(
                 packing_method=PackingMethod.PROCESSING_EFFICIENT,
                 sample_type=SampleType.COMPLEX_CARTESIAN,
-                data_item_format_code=int(self.data_item_format),
                 data_item_format=self.data_item_format,
                 sample_component_repeat=bool(self.sample_component_repeat),
                 event_tag_size_bits=0,

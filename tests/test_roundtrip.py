@@ -144,7 +144,7 @@ class TestVRT(unittest.TestCase):
     #         return PayloadFormat(
     #             packing_method=PackingMethod.PROCESSING_EFFICIENT,
     #             sample_type=SampleType.COMPLEX_CARTESIAN,
-    #             data_item_format_code=int(fmt),
+    #             data_item_format=fmt,
     #             sample_component_repeat=False,
     #             event_tag_size_bits=0,
     #             channel_tag_size_bits=0,

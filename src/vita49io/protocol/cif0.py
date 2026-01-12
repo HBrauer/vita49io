@@ -131,7 +131,7 @@ class PayloadFormat:
     Args:
         packing_method (PackingMethod): Packing method bit (processing vs link efficient).
         sample_type (SampleType): Sample type bit field describing complex vs real layout.
-        data_item_format_code (int): Raw five-bit data item format code.
+        data_item_format (DataItemFormat): Data item format enum.
         sample_component_repeat (bool): Indicates repeated component ordering.
         event_tag_size_bits (int): Width in bits for event tags.
         channel_tag_size_bits (int): Width in bits for channel tags.
@@ -140,14 +140,13 @@ class PayloadFormat:
         data_item_size_bits (int): Bits per data item.
         repeat_count (int): Repeat count encoded in word two.
         vector_size (int): Vector size encoded in word two.
-        data_item_format (Optional[DataItemFormat]): Optional friendly enum for the format code.
 
     Examples:
         >>> from vita49io.protocol.cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
         >>> PayloadFormat(
         ... packing_method=PackingMethod.PROCESSING_EFFICIENT,
         ... sample_type=SampleType.COMPLEX_CARTESIAN,
-        ... data_item_format_code=int(DataItemFormat.IEEE754_SINGLE),
+        ... data_item_format=DataItemFormat.IEEE754_SINGLE,
         ... sample_component_repeat=False,
         ... event_tag_size_bits=0,
         ... channel_tag_size_bits=0,
@@ -156,15 +155,14 @@ class PayloadFormat:
         ... data_item_size_bits=32,
         ... repeat_count=1,
         ... vector_size=1,
-        ... data_item_format=DataItemFormat.IEEE754_SINGLE
         ... ).repeat_count
         1
     """
     # Word 1 fields (bit positions per spec)
     packing_method: PackingMethod  # 0=processing-efficient, 1=link-efficient
     sample_type: SampleType  # 0=real, 1=complex cartesian, 2=complex polar
-    # Data item format: both raw 5-bit code and optional enum
-    data_item_format_code: int  # 5-bit code (0..31)
+    # Data item format enum
+    data_item_format: DataItemFormat
     sample_component_repeat: bool  # if True, components repeat (I,I,... then Q,Q,...)
     event_tag_size_bits: int  # 0..7
     channel_tag_size_bits: int  # 0..15
@@ -175,7 +173,10 @@ class PayloadFormat:
     # Word 2 fields
     repeat_count: int  # decoded (1..65536)
     vector_size: int  # decoded (1..65536)
-    data_item_format: "DataItemFormat | None" = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.data_item_format, DataItemFormat):
+            raise ValueError("data_item_format must be a DataItemFormat enum")
 
     @staticmethod
     def parse(w0: int, w1: int) -> "PayloadFormat":
@@ -199,11 +200,11 @@ class PayloadFormat:
         packing_method = PackingMethod((w0 >> 31) & 0x1)
         sample_type = SampleType((w0 >> 29) & 0x3)
         data_item_format_code = (w0 >> 24) & 0x1F
-        # Try to map to enum; keep None if unknown
+        # Map to enum; raise on unsupported codes
         try:
             data_item_format = DataItemFormat(data_item_format_code)
         except ValueError:
-            raise ValueError(f"Unsuppported DataItemFormat code: {data_item_format_code}")
+            raise ValueError(f"Unsupported DataItemFormat code: {data_item_format_code}")
         sample_component_repeat = bool((w0 >> 23) & 0x1)
         event_tag_size_bits = (w0 >> 20) & 0x7
         channel_tag_size_bits = (w0 >> 16) & 0xF
@@ -217,7 +218,6 @@ class PayloadFormat:
         return PayloadFormat(
             packing_method=packing_method,
             sample_type=sample_type,
-            data_item_format_code=data_item_format_code,
             data_item_format=data_item_format,
             sample_component_repeat=sample_component_repeat,
             event_tag_size_bits=event_tag_size_bits,
@@ -240,7 +240,7 @@ class PayloadFormat:
             >>> PayloadFormat(
             ... packing_method=PackingMethod.PROCESSING_EFFICIENT,
             ... sample_type=SampleType.COMPLEX_CARTESIAN,
-            ... data_item_format_code=int(DataItemFormat.IEEE754_SINGLE),
+            ... data_item_format=DataItemFormat.IEEE754_SINGLE,
             ... sample_component_repeat=False,
             ... event_tag_size_bits=0,
             ... channel_tag_size_bits=0,
@@ -249,7 +249,6 @@ class PayloadFormat:
             ... data_item_size_bits=32,
             ... repeat_count=1,
             ... vector_size=1,
-            ... data_item_format=DataItemFormat.IEEE754_SINGLE
             ... ).pack_words()[0] >> 31
             0
         """
@@ -257,10 +256,9 @@ class PayloadFormat:
         w0 = 0
         w0 |= (int(self.packing_method) & 0x1) << 31
         w0 |= (int(self.sample_type) & 0x3) << 29
-        code = self.data_item_format_code
-        if self.data_item_format is not None:
-            code = int(self.data_item_format) & 0x1F
-        w0 |= (code & 0x1F) << 24
+        if not isinstance(self.data_item_format, DataItemFormat):
+            raise ValueError("data_item_format must be a DataItemFormat enum")
+        w0 |= (int(self.data_item_format) & 0x1F) << 24
         w0 |= (1 if self.sample_component_repeat else 0) << 23
         w0 |= (self.event_tag_size_bits & 0x7) << 20
         w0 |= (self.channel_tag_size_bits & 0xF) << 16
