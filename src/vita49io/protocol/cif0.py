@@ -53,6 +53,10 @@ from .utils import (
 class PackingMethod(IntEnum):
     """Enumerate CIF0 packing method options.
 
+    Attributes:
+        PROCESSING_EFFICIENT (int): Processing-efficient packing.
+        LINK_EFFICIENT (int): Link-efficient packing.
+
     Examples:
         >>> from vita49io.protocol.cif0 import PackingMethod
         >>> PackingMethod.PROCESSING_EFFICIENT.value
@@ -65,6 +69,11 @@ class PackingMethod(IntEnum):
 class SampleType(IntEnum):
     """Represent CIF0 sample type enumerations.
 
+    Attributes:
+        REAL (int): Real-valued samples.
+        COMPLEX_CARTESIAN (int): Complex Cartesian (I/Q) samples.
+        COMPLEX_POLAR (int): Complex polar samples.
+
     Examples:
         >>> from vita49io.protocol.cif0 import SampleType
         >>> SampleType.COMPLEX_CARTESIAN.name
@@ -76,7 +85,12 @@ class SampleType(IntEnum):
 
 
 class DataItemFormat(IntEnum):
-    """Enumerate Payload data item format codes.
+    """Enumerate payload data item format codes.
+
+    Attributes:
+        SIGNED_FIXED_POINT (int): Signed fixed-point, normalized [-1, 1-2^-(N-1)].
+        UNSIGNED_FIXED_POINT (int): Unsigned fixed-point, normalized [0, 1-2^-N].
+        IEEE754_SINGLE (int): IEEE-754 single-precision float.
 
     Examples:
         >>> from vita49io.protocol.cif0 import DataItemFormat
@@ -90,7 +104,40 @@ class DataItemFormat(IntEnum):
     
 
 class CIF0Flags(IntFlag):
-    """Bit positions for CIF0 presence mask."""
+    """Bit positions for CIF0 presence mask.
+
+    Attributes:
+        NONE (int): No flags set.
+        CONTEXT_FIELD_CHANGE_INDICATOR (int): Context field change indicator present.
+        REFERENCE_POINT_IDENTIFIER (int): Reference point identifier present.
+        BANDWIDTH (int): Bandwidth present.
+        IF_REFERENCE_FREQUENCY (int): IF reference frequency present.
+        RF_REFERENCE_FREQUENCY (int): RF reference frequency present.
+        RF_REFERENCE_FREQUENCY_OFFSET (int): RF reference frequency offset present.
+        IF_BAND_OFFSET (int): IF band offset present.
+        REFERENCE_LEVEL_DBM (int): Reference level (dBm) present.
+        GAIN_DB (int): Gain (dB) present.
+        OVER_RANGE_COUNT (int): Over-range count present.
+        SAMPLE_RATE (int): Sample rate present.
+        TIMESTAMP_ADJUSTMENT (int): Timestamp adjustment present.
+        TIMESTAMP_CALIBRATION (int): Timestamp calibration present.
+        TEMPERATURE (int): Temperature present.
+        DEVICE_IDENTIFIER (int): Device identifier present.
+        STATE_EVENT_INDICATORS (int): State/event indicators present.
+        PAYLOAD_FORMAT (int): Payload format present.
+        FORMATTED_GPS_GEOLOCATION (int): Formatted GPS geolocation present.
+        FORMATTED_INS_GEOLOCATION (int): Formatted INS geolocation present.
+        ECEF_EPHEMERIS (int): ECEF ephemeris present.
+        RELATIVE_EPHEMERIS (int): Relative ephemeris present.
+        EPHEMERIS_REFERENCE_IDENTIFIER (int): Ephemeris reference identifier present.
+        GPS_ASCII (int): GPS ASCII field present.
+        CONTEXT_ASSOCIATION_LISTS (int): Context association lists present.
+        FIELD_ATTRIBUTES_ENABLE (int): Field attributes enable present.
+        CIF3_ENABLE (int): CIF3 present.
+        CIF2_ENABLE (int): CIF2 present.
+        CIF1_ENABLE (int): CIF1 present.
+        RESERVED_0 (int): Reserved bit 0.
+    """
 
     NONE = 0
     CONTEXT_FIELD_CHANGE_INDICATOR = 1 << 31
@@ -128,9 +175,9 @@ class CIF0Flags(IntFlag):
 class PayloadFormat:
     """Describe the payload format two-word structure.
 
-    VITA 49.2 Section 9.13.3 Data Packet Payload Format Field.
+    ANSI/VITA 49.2-2017 Section 9.13.3 Data Packet Payload Format Field.
 
-    Args:
+    Attributes:
         packing_method (PackingMethod): Packing method bit (processing vs link efficient).
         sample_type (SampleType): Sample type bit field describing complex vs real layout.
         data_item_format (DataItemFormat): Data item format enum.
@@ -289,7 +336,22 @@ ATT_SCALE = 1 << 22  # ECEF attitude radix (bit 22)
 
 @dataclass
 class FormattedGeolocation:
-    """Represent the formatted GPS/INS geolocation field (CIF0 bits 14 and 13)."""
+    """Represent the formatted GPS/INS geolocation field (CIF0 bits 14 and 13).
+
+    Attributes:
+        tsi (TSI): Timestamp integer selection.
+        tsf (TSF): Timestamp fractional selection.
+        manufacturer_oui (int): Manufacturer OUI (24-bit).
+        integer_seconds (int): Integer seconds timestamp.
+        fractional_seconds (int): Fractional seconds timestamp.
+        latitude_deg (float): Latitude in degrees.
+        longitude_deg (float): Longitude in degrees.
+        altitude_m (float): Altitude in meters.
+        speed_over_ground_m_s (float): Speed over ground in meters/second.
+        heading_angle_deg (float): Heading angle in degrees.
+        track_angle_deg (float): Track angle in degrees.
+        magnetic_variation_deg (float): Magnetic variation in degrees.
+    """
 
     tsi: TSI
     tsf: TSF
@@ -357,7 +419,24 @@ class FormattedGeolocation:
 
 @dataclass
 class Ephemeris:
-    """Represent either the ECEF Ephemeris or Relative Ephemeris (CIF0 bits 12/11)."""
+    """Represent either the ECEF Ephemeris or Relative Ephemeris (CIF0 bits 12/11).
+
+    Attributes:
+        tsi (TSI): Timestamp integer selection.
+        tsf (TSF): Timestamp fractional selection.
+        manufacturer_oui (int): Manufacturer OUI (24-bit).
+        integer_seconds (int): Integer seconds timestamp.
+        fractional_seconds (int): Fractional seconds timestamp.
+        position_x_m (float): ECEF or relative X position in meters.
+        position_y_m (float): ECEF or relative Y position in meters.
+        position_z_m (float): ECEF or relative Z position in meters.
+        attitude_alpha_deg (float): Attitude alpha in degrees.
+        attitude_beta_deg (float): Attitude beta in degrees.
+        attitude_phi_deg (float): Attitude phi in degrees.
+        velocity_dx_m_s (float): ECEF or relative X velocity in meters/second.
+        velocity_dy_m_s (float): ECEF or relative Y velocity in meters/second.
+        velocity_dz_m_s (float): ECEF or relative Z velocity in meters/second.
+    """
 
     tsi: TSI
     tsf: TSF
@@ -431,7 +510,12 @@ class Ephemeris:
 
 @dataclass
 class GPSASCIIField:
-    """Represent the GPS ASCII field (CIF0 bit 9)."""
+    """Represent the GPS ASCII field (CIF0 bit 9).
+
+    Attributes:
+        manufacturer_oui (int): Manufacturer OUI (24-bit).
+        sentences (str): ASCII NMEA or GPS text payload.
+    """
 
     manufacturer_oui: int
     sentences: str
@@ -466,7 +550,15 @@ class GPSASCIIField:
 
 @dataclass
 class ContextAssociationLists:
-    """Represent the Context Association Lists section (CIF0 bit 8)."""
+    """Represent the Context Association Lists section (CIF0 bit 8).
+
+    Attributes:
+        source_list (List[int]): Source identifiers.
+        system_list (List[int]): System identifiers.
+        vector_component_list (List[int]): Vector-component identifiers.
+        async_channel_list (List[int]): Asynchronous channel identifiers.
+        async_channel_tags (List[int] | None): Optional async-channel tags.
+    """
 
     source_list: List[int]
     system_list: List[int]
@@ -544,24 +636,24 @@ class ContextAssociationLists:
 class CIF0Fields:
     """Represent the structured fields contained in CIF0 payloads.
 
-    Args:
+    Attributes:
         context_field_change_indicator (bool): Indicates if fields have changed.
-        reference_point_identifier (Optional[int]): Optional stream identifier reference.
-        bandwidth_hz (Optional[float]): Receiver bandwidth in Hz.
-        if_reference_frequency_hz (Optional[float]): IF reference frequency in Hz.
-        rf_reference_frequency_hz (Optional[float]): RF reference frequency in Hz.
-        rf_reference_frequency_offset_hz (Optional[float]): RF frequency offset in Hz.
-        if_band_offset_hz (Optional[float]): IF band offset in Hz.
-        reference_level_dbm (Optional[float]): Reference level in dBm.
-        gain_db (Optional[Tuple[float, float]]): Optional (gain1, gain2) tuple in dB.
-        over_range_count (Optional[int]): Overrange counter value.
-        sample_rate_hz (Optional[float]): Sample rate in Hz.
-        timestamp_adjustment_fs (Optional[int]): Timestamp adjustment in femtoseconds.
-        timestamp_calibration_time_s (Optional[int]): Timestamp calibration integer seconds.
-        temperature_c (Optional[int]): Temperature in Celsius (signed).
-        device_identifier (Optional[Tuple[int, int]]): Device identifier (OUI, device).
-        state_event_indicators (Optional[int]): State and event indicator bits.
-        payload_format (Optional[PayloadFormat]): Parsed payload format helper.
+        reference_point_identifier (int | None): Optional stream identifier reference.
+        bandwidth_hz (float | None): Receiver bandwidth in Hz.
+        if_reference_frequency_hz (float | None): IF reference frequency in Hz.
+        rf_reference_frequency_hz (float | None): RF reference frequency in Hz.
+        rf_reference_frequency_offset_hz (float | None): RF frequency offset in Hz.
+        if_band_offset_hz (float | None): IF band offset in Hz.
+        reference_level_dbm (float | None): Reference level in dBm.
+        gain_db (Tuple[float, float] | None): Optional (gain1, gain2) tuple in dB.
+        over_range_count (int | None): Overrange counter value.
+        sample_rate_hz (float | None): Sample rate in Hz.
+        timestamp_adjustment_fs (int | None): Timestamp adjustment in femtoseconds.
+        timestamp_calibration_time_s (int | None): Timestamp calibration integer seconds.
+        temperature_c (int | None): Temperature in Celsius (signed).
+        device_identifier (Tuple[int, int] | None): Device identifier (OUI, device).
+        state_event_indicators (int | None): State and event indicator bits.
+        payload_format (PayloadFormat | None): Parsed payload format helper.
 
     Examples:
         >>> from vita49io.protocol.cif0 import CIF0Fields

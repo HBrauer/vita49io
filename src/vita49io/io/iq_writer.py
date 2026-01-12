@@ -58,10 +58,10 @@ def _to_vrt_time(t_epoch_s: float) -> Tuple[int, int]:
 class IQStreamWriter:
     """Coordinate VITA 49 IQ data and context packet generation.
 
-    Args:
+    Attributes:
         stream_id (int): Stream identifier written into generated packets.
         sample_rate_hz (float): Sample rate used to compute timestamps.
-        payload_format (Optional[PayloadFormat]): Explicit payload format to reuse across packets.
+        payload_format (PayloadFormat | None): Explicit payload format to reuse across packets.
         data_item_format (DataItemFormat): Data item format used when deriving payload_format.
         item_packing_field_size_bits (int): Packing field width for derived payload formats.
         data_item_size_bits (int): Per-sample data item width for derived payload formats.
@@ -71,29 +71,20 @@ class IQStreamWriter:
         data_packet_type (PacketType): Packet type used for emitted data packets.
         tsi (TSI): Timestamp Integer selection for emitted packets.
         tsf (TSF): Timestamp Fractional selection for emitted packets.
-        class_id (Optional[ClassID]): Class identifier to attach to packets.
+        class_id (ClassID | None): Class identifier to attach to packets.
         requires_vita49_2 (bool): Flag to set V49.2 indicator bit.
-        frequency_domain (bool): Set the spectrum (S) bit to indicate frequency-domain Signal Spectral Data.
-        start_time_epoch_s (Optional[float]): Initial epoch time for packet timestamps.
-        bandwidth_hz (Optional[float]): Optional CIF0 bandwidth metadata.
-        if_reference_frequency_hz (Optional[float]): Optional CIF0 IF reference frequency.
-        rf_reference_frequency_hz (Optional[float]): Optional CIF0 RF reference frequency.
-        rf_reference_frequency_offset_hz (Optional[float]): Optional CIF0 RF frequency offset.
-        if_band_offset_hz (Optional[float]): Optional CIF0 IF band offset.
-        reference_level_dbm (Optional[float]): Optional CIF0 reference level.
-        gain_db (Optional[Tuple[float, float]]): Optional CIF0 gain tuple.
-        device_identifier (Optional[Tuple[int, int]]): Optional CIF0 device identifier.
-        state_event_indicators (Optional[int]): Optional CIF0 state/event indicators.
+        frequency_domain (bool): Set the spectrum (S) bit for frequency-domain data.
+        start_time_epoch_s (float | None): Initial epoch time for packet timestamps.
+        bandwidth_hz (float | None): Optional CIF0 bandwidth metadata.
+        if_reference_frequency_hz (float | None): Optional CIF0 IF reference frequency.
+        rf_reference_frequency_hz (float | None): Optional CIF0 RF reference frequency.
+        rf_reference_frequency_offset_hz (float | None): Optional CIF0 RF frequency offset.
+        if_band_offset_hz (float | None): Optional CIF0 IF band offset.
+        reference_level_dbm (float | None): Optional CIF0 reference level.
+        gain_db (Tuple[float, float] | None): Optional CIF0 gain tuple.
+        device_identifier (Tuple[int, int] | None): Optional CIF0 device identifier.
+        state_event_indicators (int | None): Optional CIF0 state/event indicators.
         context_timestamp_mode_general (bool): Whether to set the CIF timestamp mode bit.
-
-    Returns:
-        None.
-
-    Raises:
-        ValueError: If the configuration is inconsistent (for example, invalid sample rate).
-
-    Side Effects:
-        Maintains internal counters used to advance timestamps per emitted packet.
 
     Examples:
         >>> import numpy as np

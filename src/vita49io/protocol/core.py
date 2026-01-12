@@ -38,12 +38,16 @@ WORD = struct.Struct(">I")
 
 @dataclass(slots=True)
 class LazyBinary:
-    """
-    Base class for lazy, memoryview-backed binary objects.
+    """Base class for lazy, memoryview-backed binary objects.
 
-    Subclasses keep the original bytes in `_mv` and only decode fields
-    when accessed via `_lazy_field`. When any logical field is mutated,
-    `_mark_dirty()` should be called so `to_bytes()` knows to rebuild.
+    Subclasses keep the original bytes in `_mv` and only decode fields when
+    accessed via `_lazy_field`. When any logical field is mutated, call
+    `_mark_dirty()` so `to_bytes()` knows to rebuild.
+
+    Attributes:
+        _mv (memoryview | None): Backing raw bytes for zero-copy decoding.
+        _cache (dict[str, Any]): Cache of lazily decoded fields.
+        _dirty (bool): True when fields have been mutated since parsing.
     """
 
     _mv: memoryview | None = field(default=None, repr=False)
@@ -87,7 +91,7 @@ class LazyBinary:
 class Header:
     """Represent the 32-bit VITA 49 header word.
 
-    Args:
+    Attributes:
         packet_type (PacketType): Packet type value encoded into the header.
         class_id_present (bool): Indicates the presence of Class ID fields.
         indicators_26 (bool): Packet Specific Indicator bit 26 flag.
@@ -234,6 +238,15 @@ class Header:
 
 @dataclass
 class _Common:
+    """Internal grouping of the common prefix fields across VITA 49 packet types.
+
+    Attributes:
+        header (Header): Parsed header word.
+        stream_id (int | None): Stream identifier if present.
+        class_id (ClassID | None): Class identifier if present.
+        integer_seconds (int | None): Integer timestamp if present.
+        fractional_seconds (int | None): Fractional timestamp if present.
+    """
     header: Header
     stream_id: int | None
     class_id: ClassID | None
@@ -445,4 +458,3 @@ __all__ = [
     "_parse_common_from_words",
     "_parse_common_from_bytes",
 ]
-

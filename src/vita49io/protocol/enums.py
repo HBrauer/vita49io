@@ -14,6 +14,13 @@ from enum import IntEnum
 class PacketType(IntEnum):
     """Enumerate the VITA 49 packet type identifiers.
 
+    Attributes:
+        IF_DATA_WITHOUT_STREAM_ID (int): IF data packet without stream ID.
+        IF_DATA_WITH_STREAM_ID (int): IF data packet with stream ID.
+        EXTENSION_DATA_WITHOUT_STREAM_ID (int): Extension data packet without stream ID.
+        EXTENSION_DATA_WITH_STREAM_ID (int): Extension data packet with stream ID.
+        CONTEXT_PACKET (int): Context packet.
+
     Examples:
         >>> from vita49io.protocol.enums import PacketType
         >>> PacketType.IF_DATA_WITH_STREAM_ID.value
@@ -31,6 +38,12 @@ class PacketType(IntEnum):
 class TSI(IntEnum):
     """Enumerate Timestamp Integer (TSI) selection modes for VITA 49 packets.
 
+    Attributes:
+        NONE (int): No integer timestamp.
+        UTC (int): UTC time.
+        GPS (int): GPS time.
+        OTHER (int): Other/implementation-defined time.
+
     Examples:
         >>> from vita49io.protocol.enums import TSI
         >>> TSI.UTC.name
@@ -46,6 +59,12 @@ class TSI(IntEnum):
 class TSF(IntEnum):
     """Enumerate Timestamp Fractional (TSF) selection modes for VITA 49 packets.
 
+    Attributes:
+        NONE (int): No fractional timestamp.
+        SAMPLE_COUNT (int): Sample count or real-time fractional seconds.
+        FRACTIONAL (int): Fractional seconds.
+        FREE_RUNNING (int): Free-running counter.
+
     Examples:
         >>> from vita49io.protocol.enums import TSF
         >>> TSF.FRACTIONAL.value
@@ -56,5 +75,4 @@ class TSF(IntEnum):
     SAMPLE_COUNT = 1  # Or Real-time fractional seconds depending on type
     FRACTIONAL = 2
     FREE_RUNNING = 3
-
 

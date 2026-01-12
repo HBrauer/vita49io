@@ -23,7 +23,23 @@ def _decode_fractional_time_fs(hi: int, lo: int) -> int:
 
 
 class CIF3Flags(IntFlag):
-    """Bit positions for CIF3 presence mask (temporal/environmental)."""
+    """Bit positions for CIF3 presence mask (temporal/environmental).
+
+    Attributes:
+        NONE (int): No flags set.
+        TIMESTAMP_DETAILS (int): Timestamp details present.
+        TIMESTAMP_SKEW (int): Timestamp skew present.
+        RISE_TIME (int): Rise time present.
+        FALL_TIME (int): Fall time present.
+        OFFSET_TIME (int): Offset time present.
+        PULSE_WIDTH (int): Pulse width present.
+        PERIOD (int): Period present.
+        DURATION (int): Duration present.
+        DWELL (int): Dwell present.
+        JITTER (int): Jitter present.
+        AGE (int): Age present.
+        SHELF_LIFE (int): Shelf life present.
+    """
 
     NONE = 0
     TIMESTAMP_DETAILS = 1 << 31
@@ -42,7 +58,22 @@ class CIF3Flags(IntFlag):
 
 @dataclass
 class CIF3Fields:
-    """Represent the CIF3 temporal/environmental fields."""
+    """Represent the CIF3 temporal/environmental fields.
+
+    Attributes:
+        timestamp_details (Tuple[int, int] | None): Timestamp details words.
+        timestamp_skew_fs (int | None): Timestamp skew in femtoseconds.
+        rise_time_fs (int | None): Rise time in femtoseconds.
+        fall_time_fs (int | None): Fall time in femtoseconds.
+        offset_time_fs (int | None): Offset time in femtoseconds.
+        pulse_width_fs (int | None): Pulse width in femtoseconds.
+        period_fs (int | None): Period in femtoseconds.
+        duration_fs (int | None): Duration in femtoseconds.
+        dwell_fs (int | None): Dwell in femtoseconds.
+        jitter_fs (int | None): Jitter in femtoseconds.
+        age_word (int | None): Age word (raw 32-bit, TSI/TSF dependent).
+        shelf_life_word (int | None): Shelf life word (raw 32-bit, TSI/TSF dependent).
+    """
 
     timestamp_details: Tuple[int, int] | None = None
     timestamp_skew_fs: int | None = None

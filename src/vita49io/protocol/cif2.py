@@ -12,7 +12,40 @@ from .utils import _u32
 
 
 class CIF2Flags(IntFlag):
-    """Bit positions for CIF2 presence mask (identifier-oriented fields)."""
+    """Bit positions for CIF2 presence mask (identifier-oriented fields).
+
+    Attributes:
+        NONE (int): No flags set.
+        BIND (int): Bind present.
+        CITED_SID (int): Cited stream ID present.
+        SIBLING_SID (int): Sibling stream ID present.
+        PARENT_SID (int): Parent stream ID present.
+        CHILD_SID (int): Child stream ID present.
+        CITED_MESSAGE_ID (int): Cited message ID present.
+        CONTROLLEE_ID (int): Controllee ID present.
+        CONTROLLEE_UUID (int): Controllee UUID present.
+        CONTROLLER_ID (int): Controller ID present.
+        CONTROLLER_UUID (int): Controller UUID present.
+        INFORMATION_SOURCE_ID (int): Information source ID present.
+        TRACK_ID (int): Track ID present.
+        COUNTRY_CODE (int): Country code present.
+        OPERATOR_ID (int): Operator ID present.
+        PLATFORM_CLASS (int): Platform class present.
+        PLATFORM_INSTANCE (int): Platform instance present.
+        PLATFORM_DISPLAY_TYPE (int): Platform display type present.
+        EMS_DEVICE_CLASS (int): EMS device class present.
+        EMS_DEVICE_TYPE (int): EMS device type present.
+        EMS_DEVICE_INSTANCE (int): EMS device instance present.
+        MODULATION_CLASS (int): Modulation class present.
+        MODULATION_TYPE (int): Modulation type present.
+        FUNCTION_ID (int): Function ID present.
+        MODE_ID (int): Mode ID present.
+        EVENT_ID (int): Event ID present.
+        FUNCTION_PRIORITY_ID (int): Function priority ID present.
+        COMMS_PRIORITY_ID (int): Comms priority ID present.
+        RF_FOOTPRINT (int): RF footprint present.
+        RF_FOOTPRINT_RANGE (int): RF footprint range present.
+    """
 
     NONE = 0
     BIND = 1 << 31
@@ -67,7 +100,39 @@ def _words_to_uuid(words: Sequence[int]) -> UUID:
 
 @dataclass
 class CIF2Fields:
-    """Represent the CIF2 identifier fields."""
+    """Represent the CIF2 identifier fields.
+
+    Attributes:
+        bind (int | None): Bind field.
+        cited_sid (int | None): Cited stream ID.
+        sibling_sid (int | None): Sibling stream ID.
+        parent_sid (int | None): Parent stream ID.
+        child_sid (int | None): Child stream ID.
+        cited_message_id (int | None): Cited message ID.
+        controllee_id (int | None): Controllee ID.
+        controllee_uuid (UUID | None): Controllee UUID.
+        controller_id (int | None): Controller ID.
+        controller_uuid (UUID | None): Controller UUID.
+        information_source_id (int | None): Information source ID.
+        track_id (int | None): Track ID.
+        country_code (int | None): Country code.
+        operator_id (int | None): Operator ID.
+        platform_class (int | None): Platform class.
+        platform_instance (int | None): Platform instance.
+        platform_display_type (int | None): Platform display type.
+        ems_device_class (int | None): EMS device class.
+        ems_device_type (int | None): EMS device type.
+        ems_device_instance (int | None): EMS device instance.
+        modulation_class (int | None): Modulation class.
+        modulation_type (int | None): Modulation type.
+        function_id (int | None): Function ID.
+        mode_id (int | None): Mode ID.
+        event_id (int | None): Event ID.
+        function_priority_id (int | None): Function priority ID.
+        comms_priority_id (int | None): Comms priority ID.
+        rf_footprint_range (int | None): RF footprint range.
+        rf_footprint (int | None): RF footprint.
+    """
 
     bind: int | None = None
     cited_sid: int | None = None

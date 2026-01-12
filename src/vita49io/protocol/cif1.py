@@ -16,7 +16,15 @@ from .utils import _from_s16_fixed7, _from_s64_fixed20, _to_s16_fixed7, _to_s64_
 
 
 class SpectrumType(IntEnum):
-    """Enumerate values for the Spectrum Type bit-field (Table 9.6.1.1.1-1)."""
+    """Enumerate values for the Spectrum Type bit-field (Table 9.6.1.1.1-1).
+
+    Attributes:
+        DEFAULT (int): Default or unspecified spectrum type.
+        LOG_POWER_DB (int): Log power (dB).
+        CARTESIAN (int): Cartesian spectrum.
+        POLAR (int): Polar spectrum.
+        MAGNITUDE (int): Magnitude spectrum.
+    """
 
     DEFAULT = 0
     LOG_POWER_DB = 1
@@ -26,7 +34,17 @@ class SpectrumType(IntEnum):
 
 
 class AveragingType(IntFlag):
-    """Bit-mapped averaging type (Table 9.6.1.1.2-1)."""
+    """Bit-mapped averaging type (Table 9.6.1.1.2-1).
+
+    Attributes:
+        NONE (int): No averaging.
+        LINEAR (int): Linear averaging.
+        PEAK_HOLD (int): Peak-hold averaging.
+        MIN_HOLD (int): Min-hold averaging.
+        EXPONENTIAL (int): Exponential averaging.
+        MEDIAN (int): Median averaging.
+        SMOOTHING (int): Smoothing averaging.
+    """
 
     NONE = 0
     LINEAR = 1
@@ -38,7 +56,14 @@ class AveragingType(IntFlag):
 
 
 class WindowTimeDeltaInterpretation(IntEnum):
-    """Interpretation of the Window Time-Delta field (Table 9.6.1.1.3-1)."""
+    """Interpretation of the Window Time-Delta field (Table 9.6.1.1.3-1).
+
+    Attributes:
+        NOT_CONTROLLED (int): Not controlled or unspecified.
+        PERCENT (int): Percent overlap.
+        SAMPLES (int): Number of samples.
+        TIME_NS (int): Time in nanoseconds.
+    """
 
     NOT_CONTROLLED = 0
     PERCENT = 1
@@ -47,7 +72,30 @@ class WindowTimeDeltaInterpretation(IntEnum):
 
 
 class CIF1Flags(IntFlag):
-    """Bit positions for CIF1 presence mask."""
+    """Bit positions for CIF1 presence mask.
+
+    Attributes:
+        NONE (int): No flags set.
+        PHASE (int): Phase present.
+        EB_NO_AND_BER (int): Eb/No and BER present.
+        THRESHOLD (int): Threshold present.
+        COMPRESSION_POINT (int): Compression point present.
+        INTERCEPT_POINTS (int): Intercept points present.
+        SNR_AND_NOISE_FIGURE (int): SNR and noise figure present.
+        AUX_FREQUENCY (int): Auxiliary frequency present.
+        AUX_GAIN (int): Auxiliary gain present.
+        AUX_BANDWIDTH (int): Auxiliary bandwidth present.
+        ARRAY_OF_CIF (int): Array of CIF fields present.
+        SPECTRUM (int): Spectrum field present.
+        SECTOR_STEP_SCAN (int): Sector/step-scan field present.
+        INDEX_LIST (int): Index list present.
+        DISCRETE_IO_32 (int): 32-bit discrete I/O present.
+        DISCRETE_IO_64 (int): 64-bit discrete I/O present.
+        HEALTH_STATUS (int): Health status present.
+        V49_SPEC_COMPLIANCE (int): V49 spec compliance present.
+        BUILD_INFO (int): Build information present.
+        BUFFER_SIZE (int): Buffer size present.
+    """
 
     NONE = 0
     PHASE = 1 << 31
@@ -144,7 +192,14 @@ def _encode_u64(value: int) -> Tuple[int, int]:
 
 @dataclass
 class BuildInformation:
-    """Encode/decode the build information word (Section 9.10.4)."""
+    """Encode/decode the build information word (Section 9.10.4).
+
+    Attributes:
+        year (int): Calendar year (e.g., 2025).
+        day (int): Day of year (1..366).
+        revision (int): Build revision.
+        user_defined (int): User-defined bits.
+    """
 
     year: int  # actual calendar year (e.g., 2025)
     day: int  # day of year (1..366)
@@ -169,7 +224,13 @@ class BuildInformation:
 
 @dataclass
 class BufferSizeField:
-    """Represent the Buffer Size field (two-word structure)."""
+    """Represent the Buffer Size field (two-word structure).
+
+    Attributes:
+        buffer_size_bytes (int): Buffer size in bytes.
+        level (int): Buffer level indicator.
+        status (int): Buffer status indicator.
+    """
 
     buffer_size_bytes: int
     level: int
@@ -192,7 +253,22 @@ class BufferSizeField:
 
 @dataclass
 class SectorStepRecord:
-    """Represent a single Sector/Step-Scan record."""
+    """Represent a single Sector/Step-Scan record.
+
+    Attributes:
+        sector_number (int): Sector number.
+        f1_start_frequency_hz (float): Start frequency in Hz.
+        f2_stop_frequency_hz (float | None): Stop frequency in Hz.
+        resolution_bandwidth_hz (float | None): Resolution bandwidth in Hz.
+        tune_step_size_hz (float | None): Tune step size in Hz.
+        number_of_points (int | None): Number of points.
+        default_gain_db (Tuple[float, float] | None): Default gain tuple in dB.
+        threshold_db (Tuple[float, float] | None): Threshold tuple in dB.
+        dwell_time_fs (int | None): Dwell time in femtoseconds.
+        start_time_fs (int | None): Start time in femtoseconds.
+        time3_fs (int | None): Optional time3 in femtoseconds.
+        time4_fs (int | None): Optional time4 in femtoseconds.
+    """
 
     sector_number: int
     f1_start_frequency_hz: float
@@ -273,7 +349,11 @@ def _parse_gain_tuple(word: int) -> Tuple[float, float]:
 
 @dataclass
 class SectorStepScanField:
-    """Represent the Sector/Step-Scan field (array-of-records structure)."""
+    """Represent the Sector/Step-Scan field (array-of-records structure).
+
+    Attributes:
+        records (List[SectorStepRecord]): Sector/step-scan records.
+    """
 
     records: List[SectorStepRecord]
 
@@ -474,8 +554,16 @@ class ArrayOfCifFields:
         GPS Context (time-of-day + PPS accuracy)
 
     Note: packing/parsing through ``CIF1Fields`` is currently unsupported.
-    """
 
+    Attributes:
+        cif0_mask (int): CIF0 mask for each record.
+        cif1_mask (int): CIF1 mask for each record.
+        cif2_mask (int): CIF2 mask for each record.
+        cif3_mask (int): CIF3 mask for each record.
+        cif7_mask (int): CIF7 mask for each record.
+        records (List[List[int]]): Raw per-record word lists.
+        header_size (int): Header size in 32-bit words.
+    """
     cif0_mask: int
     cif1_mask: int
     cif2_mask: int
@@ -553,7 +641,13 @@ class ArrayOfCifFields:
 
 
 class IndexListEntrySize(IntEnum):
-    """Entry size encoding for Index List entries (Table 9.3.2-1)."""
+    """Entry size encoding for Index List entries (Table 9.3.2-1).
+
+    Attributes:
+        SIZE_8 (int): 8-bit entries.
+        SIZE_16 (int): 16-bit entries.
+        SIZE_32 (int): 32-bit entries.
+    """
 
     SIZE_8 = 0b0001
     SIZE_16 = 0b0010
@@ -566,7 +660,12 @@ class IndexListEntrySize(IntEnum):
 
 @dataclass
 class IndexListField:
-    """Represent the CIF1 Index List field (Section 9.3.2)."""
+    """Represent the CIF1 Index List field (Section 9.3.2).
+
+    Attributes:
+        entries (List[int]): Index entries.
+        entry_size (IndexListEntrySize | None): Optional forced entry size.
+    """
 
     entries: List[int]
     entry_size: IndexListEntrySize | None = None
@@ -696,7 +795,25 @@ class IndexListField:
 
 @dataclass
 class SpectrumField:
-    """9.6.1 Spectrum Field. The spectrum field is a multi-word field that describes control or context for spectral information;  (fixed 13-word structure)."""
+    """9.6.1 Spectrum Field (fixed 13-word structure).
+
+    The spectrum field describes control or context for spectral information.
+
+    Attributes:
+        spectrum_type (SpectrumType | int): Spectrum type or user-defined value.
+        averaging_type (AveragingType | int): Averaging type or user-defined value.
+        window_time_delta_interpretation (WindowTimeDeltaInterpretation): Window delta interpretation.
+        window_type (int): Window type code.
+        num_transform_points (int): Number of transform points.
+        num_window_points (int): Number of window points.
+        resolution_hz (float): Resolution in Hz.
+        span_hz (float): Span in Hz.
+        number_of_averages (int): Number of averages.
+        weighting_factor (int): Weighting factor.
+        f1_index (int): F1 index.
+        f2_index (int): F2 index.
+        window_time_delta (int | float): Window time delta value.
+    """
 
     spectrum_type: Union[SpectrumType, int] # Union because of possible user defined values
     averaging_type: Union[AveragingType, int] # Union because of possible user defined values
@@ -792,7 +909,29 @@ class SpectrumField:
 
 @dataclass
 class CIF1Fields:
-    """Represent the CIF1 fields."""
+    """Represent the CIF1 fields.
+
+    Attributes:
+        phase_radians (float | None): Phase in radians.
+        eb_no_and_ber_db (Tuple[float, float] | None): (Eb/No, BER) in dB.
+        threshold_db (Tuple[float, float] | None): Threshold tuple in dB.
+        compression_point_dbm (float | None): Compression point in dBm.
+        intercept_points_dbm (Tuple[float, float] | None): (2nd, 3rd) intercept points in dBm.
+        snr_and_noise_figure_db (Tuple[float, float] | None): (SNR, noise figure) in dB.
+        aux_frequency_hz (float | None): Auxiliary frequency in Hz.
+        aux_gain_db (Tuple[float, float] | None): Auxiliary gain tuple in dB.
+        aux_bandwidth_hz (float | None): Auxiliary bandwidth in Hz.
+        array_of_cif_fields (ArrayOfCifFields | None): Array-of-CIF fields (unsupported).
+        spectrum (SpectrumField | None): Spectrum field.
+        sector_step_scan (SectorStepScanField | None): Sector/step-scan field.
+        index_list (IndexListField | None): Index list field.
+        discrete_io_32 (int | None): 32-bit discrete I/O.
+        discrete_io_64 (int | None): 64-bit discrete I/O.
+        health_status (int | None): Health status.
+        v49_spec_compliance (int | None): V49 spec compliance value.
+        build_info (BuildInformation | None): Build information.
+        buffer_size (BufferSizeField | None): Buffer size field.
+    """
 
     # Bit 31
     phase_radians: float | None = None

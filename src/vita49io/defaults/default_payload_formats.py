@@ -47,6 +47,47 @@ class DefaultPayloadFormats:
     """Processing-efficient presets using the naming pattern above.
 
     Link-efficient presets can be added later using the same suffixes.
+
+    Attributes:
+        F32_REAL (PayloadFormat): Float32 real preset.
+        S32_REAL (PayloadFormat): Signed fixed-point 32-bit real preset.
+        S24_REAL (PayloadFormat): Signed fixed-point 24-bit real preset.
+        S16_REAL (PayloadFormat): Signed fixed-point 16-bit real preset.
+        S8_REAL (PayloadFormat): Signed fixed-point 8-bit real preset.
+        S32_Q7_REAL (PayloadFormat): Signed fixed-point 32-bit real preset (Q7).
+        S24_Q7_REAL (PayloadFormat): Signed fixed-point 24-bit real preset (Q7).
+        S16_Q7_REAL (PayloadFormat): Signed fixed-point 16-bit real preset (Q7).
+        S8_Q7_REAL (PayloadFormat): Signed fixed-point 8-bit real preset (Q7).
+        U32_REAL (PayloadFormat): Unsigned fixed-point 32-bit real preset.
+        U24_REAL (PayloadFormat): Unsigned fixed-point 24-bit real preset.
+        U16_REAL (PayloadFormat): Unsigned fixed-point 16-bit real preset.
+        U8_REAL (PayloadFormat): Unsigned fixed-point 8-bit real preset.
+        F32_IQ (PayloadFormat): Float32 complex Cartesian preset.
+        S32_IQ (PayloadFormat): Signed fixed-point 32-bit complex Cartesian preset.
+        S24_IQ (PayloadFormat): Signed fixed-point 24-bit complex Cartesian preset.
+        S16_IQ (PayloadFormat): Signed fixed-point 16-bit complex Cartesian preset.
+        S8_IQ (PayloadFormat): Signed fixed-point 8-bit complex Cartesian preset.
+        S32_Q7_IQ (PayloadFormat): Signed fixed-point 32-bit complex Cartesian preset (Q7).
+        S24_Q7_IQ (PayloadFormat): Signed fixed-point 24-bit complex Cartesian preset (Q7).
+        S16_Q7_IQ (PayloadFormat): Signed fixed-point 16-bit complex Cartesian preset (Q7).
+        S8_Q7_IQ (PayloadFormat): Signed fixed-point 8-bit complex Cartesian preset (Q7).
+        U32_IQ (PayloadFormat): Unsigned fixed-point 32-bit complex Cartesian preset.
+        U24_IQ (PayloadFormat): Unsigned fixed-point 24-bit complex Cartesian preset.
+        U16_IQ (PayloadFormat): Unsigned fixed-point 16-bit complex Cartesian preset.
+        U8_IQ (PayloadFormat): Unsigned fixed-point 8-bit complex Cartesian preset.
+        F32_POLAR (PayloadFormat): Float32 complex polar preset.
+        S32_POLAR (PayloadFormat): Signed fixed-point 32-bit complex polar preset.
+        S24_POLAR (PayloadFormat): Signed fixed-point 24-bit complex polar preset.
+        S16_POLAR (PayloadFormat): Signed fixed-point 16-bit complex polar preset.
+        S8_POLAR (PayloadFormat): Signed fixed-point 8-bit complex polar preset.
+        S32_Q7_POLAR (PayloadFormat): Signed fixed-point 32-bit complex polar preset (Q7).
+        S24_Q7_POLAR (PayloadFormat): Signed fixed-point 24-bit complex polar preset (Q7).
+        S16_Q7_POLAR (PayloadFormat): Signed fixed-point 16-bit complex polar preset (Q7).
+        S8_Q7_POLAR (PayloadFormat): Signed fixed-point 8-bit complex polar preset (Q7).
+        U32_POLAR (PayloadFormat): Unsigned fixed-point 32-bit complex polar preset.
+        U24_POLAR (PayloadFormat): Unsigned fixed-point 24-bit complex polar preset.
+        U16_POLAR (PayloadFormat): Unsigned fixed-point 16-bit complex polar preset.
+        U8_POLAR (PayloadFormat): Unsigned fixed-point 8-bit complex polar preset.
     """
 
     # Real

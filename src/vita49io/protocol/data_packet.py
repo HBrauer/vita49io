@@ -33,8 +33,22 @@ from .cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
 class DataPacket(LazyBinary):
     """Represent a VITA 49 data packet with lazy payload/sample decoding.
 
-    - `data` exposes a zero-copy view of the raw payload in on-wire dtype/endianness.
-    - `data_float32` returns decoded float32/complex64 samples when a payload_format is set.
+    Attributes:
+        _header (Header | None): Parsed or user-provided header.
+        _stream_id (int | None): Stream identifier if present.
+        _class_id (ClassID | None): Class identifier if present.
+        _integer_seconds (int | None): Integer timestamp if present.
+        _fractional_seconds (int | None): Fractional timestamp if present.
+        _payload (bytes | memoryview | None): Raw on-wire payload bytes.
+        _trailer (int | None): Trailer word if present.
+        _data_float32 (np.ndarray | None): Decoded sample cache.
+        _payload_format (PayloadFormat | None): Format used for sample decoding/encoding.
+        _copy_payload (bool): Copy payload bytes out of `_mv` on first access.
+        validate_strict (bool): Enables stricter payload-format validation (if supported).
+
+    Notes:
+        - `data` exposes a zero-copy view of the raw payload in on-wire dtype/endianness.
+        - `data_float32` returns decoded float32/complex64 samples when a payload_format is set.
     """
 
     _header: Header | None = None
@@ -70,6 +84,40 @@ class DataPacket(LazyBinary):
         _mv: memoryview | None = None,
         copy_payload: bool = False,
     ) -> None:
+        """Initialize a DataPacket for user construction or memoryview-backed parsing.
+
+        Args:
+            header (Header | None): Pre-built header; required if `packet_type` is omitted.
+            packet_type (PacketType | None): Convenience for creating a header in-place.
+            tsi (TSI): Timestamp integer selection (if building a new header).
+            tsf (TSF): Timestamp fractional selection (if building a new header).
+            packet_count (int): Rolling 4-bit sequence counter (if building a new header).
+            stream_id (int | None): Optional stream identifier; required/forbidden by packet type.
+            class_id (ClassID | None): Optional class identifier when `header.class_id_present`.
+            integer_seconds (int | None): Integer seconds timestamp (if present).
+            fractional_seconds (int | None): Fractional seconds timestamp (if present).
+            payload (bytes | memoryview | None): Raw on-wire payload bytes.
+            trailer (int | None): Trailer word (present when header indicator 26 is set).
+            data_float32 (np.ndarray | None): Decoded samples; re-encoded on `to_bytes()`.
+            payload_format (PayloadFormat | None): Payload format used for sample decoding/encoding.
+            validate_strict (bool): Enables stricter payload-format validation (if supported).
+            requiresVita49_2 (bool): Sets header indicator 25 when building a new header.
+            _mv (memoryview | None): Internal raw-bytes backing; set by `from_bytes()`.
+            copy_payload (bool): If true, copy payload bytes out of `_mv` on first access.
+
+        Notes:
+            - For user-created packets, provide `header` or `packet_type`; `_mv` is internal.
+            - `payload` is the raw on-wire representation; `data_float32` is decoded samples.
+            - If `_mv` is provided, fields are decoded lazily and `to_bytes()` fast-paths
+              to the original bytes unless mutated.
+
+        Examples:
+            >>> from vita49io.protocol.data_packet import DataPacket
+            >>> from vita49io.protocol.enums import PacketType
+            >>> pkt = DataPacket(packet_type=PacketType.IF_DATA_WITHOUT_STREAM_ID, payload=b"")
+            >>> pkt.packet_type == PacketType.IF_DATA_WITHOUT_STREAM_ID
+            True
+        """
         # Call base __init__ directly to avoid dataclass/super slot quirks
         LazyBinary.__init__(self, _mv=_mv)
         if header is None and packet_type is not None:

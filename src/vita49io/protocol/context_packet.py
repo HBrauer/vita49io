@@ -38,7 +38,16 @@ from .vrt_types import ClassID
 
 @dataclass(init=False, slots=True)
 class ContextPacket(LazyBinary):
-    """Represent a VITA 49 context packet including CIF0 metadata."""
+    """Represent a VITA 49 context packet including CIF0 metadata.
+
+    Attributes:
+        _header (Header | None): Parsed or user-provided header.
+        _stream_id (int | None): Stream identifier if present.
+        _class_id (ClassID | None): Class identifier if present.
+        _integer_seconds (int | None): Integer timestamp if present.
+        _fractional_seconds (int | None): Fractional timestamp if present.
+        _cif0 (CIF0Fields | None): CIF0 metadata block if present.
+    """
 
     _header: Header | None = None
     _stream_id: int | None = None
@@ -66,6 +75,35 @@ class ContextPacket(LazyBinary):
         timestamp_mode: bool = False,
         _mv: memoryview | None = None,
     ) -> None:
+        """Initialize a ContextPacket for user construction or memoryview-backed parsing.
+
+        Args:
+            header (Header | None): Pre-built header; required if `packet_type` is omitted.
+            packet_type (PacketType | None): Convenience for creating a header in-place.
+            tsi (TSI): Timestamp integer selection (if building a new header).
+            tsf (TSF): Timestamp fractional selection (if building a new header).
+            packet_count (int): Rolling 4-bit sequence counter (if building a new header).
+            stream_id (int | None): Stream identifier (required for context packets).
+            class_id (ClassID | None): Optional class identifier when `header.class_id_present`.
+            integer_seconds (int | None): Integer seconds timestamp (if present).
+            fractional_seconds (int | None): Fractional seconds timestamp (if present).
+            cif0 (CIF0Fields | None): CIF0 context metadata block.
+            requiresVita49_2 (bool): Sets header indicator 25 when building a new header.
+            timestamp_mode (bool): Sets header indicator 24 (timestamp mode/TSM).
+            _mv (memoryview | None): Internal raw-bytes backing; set by `from_bytes()`.
+
+        Notes:
+            - For user-created packets, provide `header` or `packet_type`; `_mv` is internal.
+            - If `_mv` is provided, fields are decoded lazily and `to_bytes()` fast-paths
+              to the original bytes unless mutated.
+
+        Examples:
+            >>> from vita49io.protocol.context_packet import ContextPacket
+            >>> from vita49io.protocol.enums import PacketType
+            >>> pkt = ContextPacket(packet_type=PacketType.CONTEXT_PACKET, stream_id=1)
+            >>> pkt.stream_id
+            1
+        """
         # Call base __init__ directly to avoid dataclass/super slot quirks
         LazyBinary.__init__(self, _mv=_mv)
         if header is None and packet_type is not None:
