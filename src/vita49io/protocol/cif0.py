@@ -128,6 +128,8 @@ class CIF0Flags(IntFlag):
 class PayloadFormat:
     """Describe the payload format two-word structure.
 
+    VITA 49.2 Section 9.13.3 Data Packet Payload Format Field.
+
     Args:
         packing_method (PackingMethod): Packing method bit (processing vs link efficient).
         sample_type (SampleType): Sample type bit field describing complex vs real layout.
@@ -177,6 +179,8 @@ class PayloadFormat:
     def __post_init__(self) -> None:
         if not isinstance(self.data_item_format, DataItemFormat):
             raise ValueError("data_item_format must be a DataItemFormat enum")
+        if self.sample_component_repeat:
+            raise ValueError("sample_component_repeat=true is not supported")
 
     @staticmethod
     def parse(w0: int, w1: int) -> "PayloadFormat":
@@ -206,6 +210,8 @@ class PayloadFormat:
         except ValueError:
             raise ValueError(f"Unsupported DataItemFormat code: {data_item_format_code}")
         sample_component_repeat = bool((w0 >> 23) & 0x1)
+        if sample_component_repeat:
+            raise ValueError("sample_component_repeat=true is not supported")
         event_tag_size_bits = (w0 >> 20) & 0x7
         channel_tag_size_bits = (w0 >> 16) & 0xF
         data_item_fraction_size_bits = (w0 >> 12) & 0xF
