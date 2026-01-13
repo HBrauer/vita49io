@@ -58,6 +58,7 @@ import numpy as np
 from vita49io import ContextPacket, DataPacket, PacketType, TSI, TSF, CIF0Fields
 from vita49io.protocol.cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
 from vita49io.protocol.core import Header
+from vita49io.io.payload_codec import payload_from_numpy
 
 stream_id = 0x2468ACE0
 sample_rate_hz = 1_000_000.0
@@ -121,9 +122,9 @@ data_pkt = DataPacket(
     stream_id=stream_id,
     integer_seconds=1_700_000_000,
     fractional_seconds=0,
-    data_float32=spectrum,  # complex bins
+    payload=payload_from_numpy(spectrum, pf),  # complex bins
 )
-data_bytes = data_pkt.to_bytes(payload_format=pf)
+data_bytes = data_pkt.to_bytes()
 open("out_spectrum.v49", "wb").write(ctx_bytes + data_bytes)
 ```
 

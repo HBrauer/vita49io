@@ -17,6 +17,7 @@ import numpy as np
 from vita49io import ContextPacket, DataPacket, PacketType, TSI, TSF, CIF0Fields
 from vita49io.protocol.cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
 from vita49io.protocol.core import Header
+from vita49io.io.payload_codec import payload_from_numpy
 
 
 def build_payload_format() -> PayloadFormat:
@@ -102,9 +103,9 @@ def main(argv: list[str]) -> int:
         stream_id=stream_id,
         integer_seconds=1_700_000_000,
         fractional_seconds=0,
-        data_float32=spectrum,  # treat frequency bins as complex samples; S-bit marks them spectral
+        payload=payload_from_numpy(spectrum, payload_format),
     )
-    out += data_pkt.to_bytes(payload_format=payload_format)
+    out += data_pkt.to_bytes()
 
     out_path.write_bytes(bytes(out))
     print(f"Wrote frequency-domain context + data to {out_path} ({len(out)} bytes)")

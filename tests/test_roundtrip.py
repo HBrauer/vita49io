@@ -181,18 +181,16 @@ class TestVRT(unittest.TestCase):
     #             stream_id=0x22223333,
     #             tsi=TSI.NONE,
     #             tsf=TSF.NONE,
-    #             data_float32=base_iq,
+    #             payload=payload_from_numpy(base_iq, pf),
     #             packet_count=3,
     #         )
-    #         b = p.to_bytes(payload_format=pf)
-    #         q = DataPacket.from_bytes(b, payload_format=pf)
+    #         b = p.to_bytes()
+    #         q = DataPacket.from_bytes(b)
 
     #         self.assertEqual(q.packet_type, PacketType.IF_DATA_WITH_STREAM_ID)
     #         self.assertEqual(q.stream_id, 0x22223333)
-    #         self.assertIsNotNone(q.data_float32)
     #         self.assertEqual(q.packet_count, 3)
-
-    #         got = q.data_float32  # type: ignore[assignment]
+    #         got = payload_as_numpy(q.payload, pf)  # type: ignore[arg-type]
     #         # Tolerance based on quantization step
     #         if fmt == DataItemFormat.IEEE754_SINGLE:
     #             atol = 1e-6
@@ -224,7 +222,7 @@ class TestVRT(unittest.TestCase):
         self.assertTrue(pkt.header.indicators_24)
 
         raw = writer.build_data_packet_bytes(np.zeros(4, dtype=np.complex64))
-        parsed = DataPacket.from_bytes(raw, payload_format=writer.payload_format)
+        parsed = DataPacket.from_bytes(raw)
         self.assertTrue(parsed.header.indicators_24)
 
 if __name__ == "__main__":

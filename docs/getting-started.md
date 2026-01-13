@@ -53,6 +53,7 @@ from vita49io.protocol.core import Header
 from vita49io.protocol.enums import PacketType
 from vita49io import DataPacket, ContextPacket
 from vita49io.protocol.cif0 import PayloadFormat
+from vita49io.io.payload_codec import payload_as_numpy
 
 last_pf: PayloadFormat | None = None
 with open(path, "rb") as f:
@@ -70,9 +71,12 @@ with open(path, "rb") as f:
                 last_pf = ctx.cif0.payload_format
             handle(ctx)
         else:
-            data = DataPacket.from_bytes(pkt_bytes, payload_format=last_pf)
-            # data.data_float32 is a complex64 NumPy array when last_pf is compatible
-            handle(data)
+            data = DataPacket.from_bytes(pkt_bytes)
+            if last_pf is not None:
+                payload = data.payload
+                payload_bytes = payload.tobytes() if isinstance(payload, memoryview) else payload
+                iq = payload_as_numpy(payload_bytes, last_pf)
+                handle(iq)
 ```
 
 See: `examples/read_v49_file.py`.
@@ -106,7 +110,7 @@ for i in range(0, N, 1024):
 open("out.v49", "wb").write(out)
 ```
 
-- Time handling: timestamps start at `start_time_epoch_s` (default now, UTC) and advance by `len(data_float32)/sample_rate_hz` for each packet.
+- Time handling: timestamps start at `start_time_epoch_s` (default now, UTC) and advance by `len(iq)/sample_rate_hz` for each packet.
 - Timestamps are emitted using `tsi`/`tsf` (defaults: `UTC` + `FRACTIONAL`).
 - To use fixed‑point payloads, build a `PayloadFormat` and pass it to the writer via constructor fields; it propagates to context and data encoding.
 

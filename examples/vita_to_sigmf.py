@@ -129,6 +129,7 @@ def convert_vita_to_sigmf(
     from vita49io.protocol.core import Header
     from vita49io.protocol.data_packet import DataPacket
     from vita49io.protocol.enums import PacketType
+    from vita49io.io.payload_codec import payload_as_numpy
 
     input_path = input_path.expanduser()
     output_prefix = output_prefix.expanduser()
@@ -213,12 +214,10 @@ def convert_vita_to_sigmf(
                     skipped_packets += 1
                     packet_index += 1
                     continue
-                pkt = DataPacket.from_bytes(packet_bytes, payload_format=last_payload_format)
-                if pkt.data_float32 is None:
-                    raise RuntimeError(
-                        f"Failed to decode sample payload for data packet at index {packet_index}"
-                    )
-                iq = np.asarray(pkt.data_float32, dtype=np.complex64)
+                pkt = DataPacket.from_bytes(packet_bytes)
+                payload = pkt.payload
+                payload_bytes = payload.tobytes() if isinstance(payload, memoryview) else payload
+                iq = payload_as_numpy(payload_bytes, last_payload_format)
                 if iq.size > 0:
                     out_f.write(iq.astype(dtype_le_c8, copy=False).tobytes())
                     total_samples += int(iq.size)

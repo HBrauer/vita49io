@@ -72,27 +72,12 @@ Example: build a Data packet using raw payload bytes
 ```python
 import numpy as np
 from vita49io import DataPacket, PacketType, TSI, TSF
+from vita49io.protocol.cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
+from vita49io.io.payload_codec import payload_as_numpy, payload_from_numpy
 
 stream_id = 0x12345678
 
-# Two complex samples: (I0,Q0)=(1.0,0.0), (I1,Q1)=(0.0,1.0)
-# Encode as big‑endian IEEE754 float32 words: I0,Q0,I1,Q1
-payload = np.array([1.0, 0.0, 0.0, 1.0], dtype=">f4").tobytes()
-
-pkt = DataPacket(
-    packet_type=PacketType.IF_DATA_WITH_STREAM_ID,
-    stream_id=stream_id,
-    tsi=TSI.UTC,
-    tsf=TSF.FRACTIONAL,
-    integer_seconds=1_700_000_000,
-    fractional_seconds=0,
-    payload=payload,  # raw payload goes here
-)
-raw = pkt.to_bytes()
-
-# If you know the payload format (e.g., from the last Context packet),
-# pass it to decode samples back to a complex64 NumPy array.
-from vita49io.protocol.cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
+# Define a payload format for encoding/decoding I/Q samples.
 pf = PayloadFormat(
     packing_method=PackingMethod.PROCESSING_EFFICIENT,
     sample_type=SampleType.COMPLEX_CARTESIAN,
@@ -106,8 +91,28 @@ pf = PayloadFormat(
     repeat_count=1,
     vector_size=0,
 )
-same = DataPacket.from_bytes(raw, payload_format=pf)
-data_float32 = same.data_float32  # complex64 array of shape (2,)
+
+# Two complex samples: (I0,Q0)=(1.0,0.0), (I1,Q1)=(0.0,1.0)
+iq = np.array([1.0 + 0.0j, 0.0 + 1.0j], dtype=np.complex64)
+payload = payload_from_numpy(iq, pf)
+
+pkt = DataPacket(
+    packet_type=PacketType.IF_DATA_WITH_STREAM_ID,
+    stream_id=stream_id,
+    tsi=TSI.UTC,
+    tsf=TSF.FRACTIONAL,
+    integer_seconds=1_700_000_000,
+    fractional_seconds=0,
+    payload=payload,  # raw payload goes here
+)
+raw = pkt.to_bytes()
+
+# If you know the payload format (e.g., from the last Context packet),
+# use the payload helpers to decode samples back to a complex64 NumPy array.
+same = DataPacket.from_bytes(raw)
+payload = same.payload
+payload_bytes = payload.tobytes() if isinstance(payload, memoryview) else payload
+data_float32 = payload_as_numpy(payload_bytes, pf)  # complex64 array of shape (2,)
 ```
 
 Example: create frequency-domain context + data packets
@@ -185,9 +190,8 @@ data_bytes = data_pkt.to_bytes()
 Notes
 - Data payload bytes must be 32-bit aligned; the library pads to a word boundary as needed.
 - For numeric payloads, use big-endian dtypes (e.g., `">f4"`, `">i2"`) to match VRT network byte order.
-- When you already have encoded bytes, set `payload` and omit `payload_format`.
-- `data` provides a zero-copy view of the on-wire payload; `data_float32` returns decoded float32/complex64 samples.
-- When you want the library to encode/decode samples, provide `payload_format` and set/use `data_float32`.
+- When you already have encoded bytes, set `payload` directly.
+- Use `payload_from_numpy`, `payload_as_numpy`, and `payload_as_numpy_view` to translate between payload bytes and NumPy arrays.
 - For frequency-domain Signal Spectral Data, set header bit 24 (`indicators_24=True`) or use `IQStreamWriter(frequency_domain=True)` to raise the S-bit per AV49.2 Rule 6.3.1-2.
 
 
@@ -201,6 +205,7 @@ from vita49io.protocol.core import Header
 from vita49io.protocol.enums import PacketType
 from vita49io import DataPacket, ContextPacket
 from vita49io.protocol.cif0 import PayloadFormat
+from vita49io.io.payload_codec import payload_as_numpy
 
 last_pf: PayloadFormat | None = None
 with open(path, "rb") as f:
@@ -218,9 +223,12 @@ with open(path, "rb") as f:
                 last_pf = ctx.cif0.payload_format
             handle(ctx)
         else:
-            data = DataPacket.from_bytes(pkt_bytes, payload_format=last_pf)
-            # data.data_float32 is a complex64 NumPy array when last_pf is compatible
-            handle(data)
+            data = DataPacket.from_bytes(pkt_bytes)
+            if last_pf is not None:
+                payload = data.payload
+                payload_bytes = payload.tobytes() if isinstance(payload, memoryview) else payload
+                iq = payload_as_numpy(payload_bytes, last_pf)
+                handle(iq)
 ```
 
 See: `examples/read_v49_file.py`.
@@ -255,7 +263,7 @@ for i in range(0, N, 1024):
 open("out.v49", "wb").write(out)
 ```
 
-- Time handling: timestamps start at `start_time_epoch_s` (default now, UTC) and advance by `len(data_float32)/sample_rate_hz` for each packet.
+- Time handling: timestamps start at `start_time_epoch_s` (default now, UTC) and advance by `len(iq)/sample_rate_hz` for each packet.
 - Timestamps are emitted using `tsi`/`tsf` (defaults: `UTC` + `FRACTIONAL`).
 - To use fixed-point payloads, build a `PayloadFormat` and pass it to the writer via constructor fields; it propagates to context and data encoding.
 

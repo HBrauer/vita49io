@@ -19,6 +19,11 @@ Examples:
 """
 
 from .iq_writer import IQStreamWriter
+from .payload_codec import payload_as_numpy, payload_from_numpy, payload_as_numpy_view
 
-__all__ = ["IQStreamWriter"]
-
+__all__ = [
+    "IQStreamWriter",
+    "payload_as_numpy",
+    "payload_from_numpy",
+    "payload_as_numpy_view",
+]

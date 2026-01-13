@@ -17,19 +17,14 @@ def _ensure_src_on_path() -> None:
 def read_all_packets(path: str):
     """Iterate all VITA 49 packets in a file.
 
-    Uses the header to determine packet size and type, parses context packets
-    (including CIF0) and remembers the last context payload format to decode
-    subsequent data packets (I/Q extraction when compatible).
+    Uses the header to determine packet size and type and parses context packets
+    (including CIF0). Sample decoding is handled separately via payload helpers.
     Yields (header, packet) tuples.
     """
     from vita49io.protocol.core import Header
     from vita49io.protocol.enums import PacketType
     from vita49io.protocol.data_packet import DataPacket
     from vita49io.protocol.context_packet import ContextPacket
-    from vita49io.protocol.cif0 import PayloadFormat
-
-    last_payload_format: Optional[PayloadFormat] = None
-
     with open(path, "rb") as f:
         index = 0
         while True:
@@ -59,8 +54,6 @@ def read_all_packets(path: str):
                 pkt = ContextPacket.from_bytes(packet_bytes)
                 # If ContextPacket already parsed CIF0, reuse it to update
                 # the last known payload format for subsequent data packets.
-                if pkt.cif0 is not None and pkt.cif0.payload_format is not None:
-                    last_payload_format = pkt.cif0.payload_format
                 yield header, pkt
             elif header.packet_type in (
                 PacketType.IF_DATA_WITHOUT_STREAM_ID,
@@ -68,7 +61,7 @@ def read_all_packets(path: str):
                 PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
                 PacketType.EXTENSION_DATA_WITH_STREAM_ID,
             ):
-                pkt = DataPacket.from_bytes(packet_bytes, payload_format=last_payload_format)
+                pkt = DataPacket.from_bytes(packet_bytes)
                 yield header, pkt
             else:
                 raise ValueError(f"Unsupported packet type at index {index}: {header.packet_type}")

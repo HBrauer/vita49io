@@ -56,17 +56,14 @@ class BenchmarkResult:
 
 
 def _iter_packets_from_bytes(buf: bytes) -> Iterable[object]:
-    """Parse packets from a VITA 49 buffer, tracking CIF0 payload formats."""
+    """Parse packets from a VITA 49 buffer."""
     from vita49io.protocol.core import Header
     from vita49io.protocol.enums import PacketType
     from vita49io.protocol.data_packet import DataPacket
     from vita49io.protocol.context_packet import ContextPacket
-    from vita49io.protocol.cif0 import PayloadFormat
-
     offset = 0
     index = 0
     total_len = len(buf)
-    last_payload_format: Optional[PayloadFormat] = None
 
     while offset < total_len:
         if offset + 4 > total_len:
@@ -85,8 +82,6 @@ def _iter_packets_from_bytes(buf: bytes) -> Iterable[object]:
         packet_bytes = buf[offset : offset + total_bytes]
         if header.packet_type == PacketType.CONTEXT_PACKET:
             pkt = ContextPacket.from_bytes(packet_bytes)
-            if pkt.cif0 is not None and pkt.cif0.payload_format is not None:
-                last_payload_format = pkt.cif0.payload_format
             yield pkt
         elif header.packet_type in (
             PacketType.IF_DATA_WITHOUT_STREAM_ID,
@@ -94,7 +89,7 @@ def _iter_packets_from_bytes(buf: bytes) -> Iterable[object]:
             PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
             PacketType.EXTENSION_DATA_WITH_STREAM_ID,
         ):
-            yield DataPacket.from_bytes(packet_bytes, payload_format=last_payload_format)
+            yield DataPacket.from_bytes(packet_bytes)
         else:
             raise ValueError(f"Unsupported packet type at index {index}: {header.packet_type}")
 

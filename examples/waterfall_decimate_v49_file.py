@@ -15,16 +15,17 @@ def _ensure_src_on_path() -> None:
 
 
 def read_packets_with_iq(path: str):
-    """Iterate packets and yield (data_float32, sample_rate_hz, center_hz) for each DataPacket.
+    """Iterate packets and yield (iq, sample_rate_hz, center_hz) for each DataPacket.
 
     Keeps track of the last CIF0 payload format, which enables float32/complex64 decoding
-    in DataPacket.from_bytes(). Also extracts sample_rate_hz from CIF0 when present.
+    via helper functions. Also extracts sample_rate_hz from CIF0 when present.
     """
     from vita49io.protocol.core import Header
     from vita49io.protocol.enums import PacketType
     from vita49io.protocol.data_packet import DataPacket
     from vita49io.protocol.context_packet import ContextPacket
     from vita49io.protocol.cif0 import PayloadFormat
+    from vita49io.io.payload_codec import payload_as_numpy
 
     last_payload_format: Optional[PayloadFormat] = None
     last_sample_rate_hz: Optional[float] = None
@@ -82,9 +83,13 @@ def read_packets_with_iq(path: str):
                 PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
                 PacketType.EXTENSION_DATA_WITH_STREAM_ID,
             ):
-                pkt = DataPacket.from_bytes(packet_bytes, payload_format=last_payload_format)
-                if pkt.data_float32 is not None:
-                    yield pkt.data_float32, last_sample_rate_hz, last_center_hz
+                if last_payload_format is None:
+                    continue
+                pkt = DataPacket.from_bytes(packet_bytes)
+                payload = pkt.payload
+                payload_bytes = payload.tobytes() if isinstance(payload, memoryview) else payload
+                iq = payload_as_numpy(payload_bytes, last_payload_format)
+                yield iq, last_sample_rate_hz, last_center_hz
             else:
                 # Skip unsupported packet types
                 pass

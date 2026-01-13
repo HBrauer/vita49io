@@ -15,7 +15,7 @@ def _ensure_src_on_path() -> None:
 
 
 def read_packets_with_iq(path: str):
-    """Return an iterable over (data_float32, sample_rate_hz, timestamp_s) with context metadata.
+    """Return an iterable over (iq, sample_rate_hz, timestamp_s) with context metadata.
 
     - Iteration yields tuples for each DataPacket with decoded float32/complex64 samples.
     - Attributes on the returned iterable instance (not a bare generator):
@@ -27,6 +27,7 @@ def read_packets_with_iq(path: str):
     from vita49io.protocol.data_packet import DataPacket
     from vita49io.protocol.context_packet import ContextPacket
     from vita49io.protocol.cif0 import PayloadFormat
+    from vita49io.io.payload_codec import payload_as_numpy
 
     def _pkt_time_s(integer_seconds: Optional[int], fractional_seconds: Optional[int]) -> Optional[float]:
         if integer_seconds is None and fractional_seconds is None:
@@ -98,16 +99,18 @@ def read_packets_with_iq(path: str):
                         PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
                         PacketType.EXTENSION_DATA_WITH_STREAM_ID,
                     ):
-                        pkt = DataPacket.from_bytes(
-                            packet_bytes, payload_format=self._last_payload_format
-                        )
-                        if pkt.data_float32 is not None:
-                            t_s = _pkt_time_s(pkt.integer_seconds, pkt.fractional_seconds)
-                            if t_s is not None:
-                                if self.first_timestamp_s is None:
-                                    self.first_timestamp_s = t_s
-                                self.last_timestamp_s = t_s
-                            yield pkt.data_float32, self.first_sample_rate_hz, t_s
+                        if self._last_payload_format is None:
+                            continue
+                        pkt = DataPacket.from_bytes(packet_bytes)
+                        payload = pkt.payload
+                        payload_bytes = payload.tobytes() if isinstance(payload, memoryview) else payload
+                        iq = payload_as_numpy(payload_bytes, self._last_payload_format)
+                        t_s = _pkt_time_s(pkt.integer_seconds, pkt.fractional_seconds)
+                        if t_s is not None:
+                            if self.first_timestamp_s is None:
+                                self.first_timestamp_s = t_s
+                            self.last_timestamp_s = t_s
+                        yield iq, self.first_sample_rate_hz, t_s
                     else:
                         pass
 

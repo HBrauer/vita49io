@@ -26,6 +26,7 @@ from ..protocol.cif0 import (
     SampleType,
     DataItemFormat,
 )
+from .payload_codec import payload_from_numpy
 
 
 def _now_epoch_s() -> float:
@@ -233,8 +234,8 @@ class IQStreamWriter:
             >>> from vita49io.io.iq_writer import IQStreamWriter
             >>> writer = IQStreamWriter(stream_id=1, sample_rate_hz=1e6)
             >>> pkt = writer.build_data_packet(np.zeros(4, dtype=np.complex64))
-            >>> pkt.data_float32.shape[0]
-            4
+            >>> len(pkt.payload) > 0
+            True
         """
         # Determine number of IQ samples
         arr = np.asarray(iq)
@@ -259,13 +260,16 @@ class IQStreamWriter:
             packet_count=(self._packet_count & 0xF),
             packet_size=0,
         )
+        if self.payload_format is None:
+            raise ValueError("payload_format must be set before encoding samples")
+        payload = payload_from_numpy(arr, self.payload_format)
         pkt = DataPacket(
             header=header,
             stream_id=self.stream_id,
             class_id=self.class_id,
             integer_seconds=integer_seconds if self.tsi != TSI.NONE else None,
             fractional_seconds=fractional_seconds if self.tsf != TSF.NONE else None,
-            data_float32=arr,
+            payload=payload,
         )
 
         # Advance state
@@ -298,7 +302,7 @@ class IQStreamWriter:
             True
         """
         pkt = self.build_data_packet(iq)
-        return pkt.to_bytes(payload_format=self.payload_format)
+        return pkt.to_bytes()
 
     def build_context_packet(self) -> ContextPacket:
         """Create a ContextPacket representing the current stream configuration.

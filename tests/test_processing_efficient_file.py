@@ -15,6 +15,7 @@ from vita49io.protocol.context_packet import ContextPacket
 from vita49io.protocol.core import Header
 from vita49io.protocol.data_packet import DataPacket
 from vita49io.protocol.enums import PacketType, TSI, TSF
+from vita49io.io.payload_codec import payload_as_numpy, payload_from_numpy
 
 
 class TestProcessingEfficientFile(unittest.TestCase):
@@ -69,12 +70,12 @@ class TestProcessingEfficientFile(unittest.TestCase):
             stream_id=stream_id,
             tsi=TSI.NONE,
             tsf=TSF.NONE,
-            data_float32=expected_iq,
+            payload=payload_from_numpy(expected_iq, payload_format),
             packet_count=1,
         )
 
         context_bytes = context_packet.to_bytes()
-        data_bytes = data_packet.to_bytes(payload_format=payload_format)
+        data_bytes = data_packet.to_bytes()
 
   
         
@@ -115,12 +116,10 @@ class TestProcessingEfficientFile(unittest.TestCase):
                             last_payload_format,
                             "Data packet encountered before payload format was defined",
                         )
-                        data = DataPacket.from_bytes(
-                            packet_bytes,
-                            payload_format=last_payload_format,
-                        )
-                        self.assertIsNotNone(data.data_float32)
-                        decoded_iq = data.data_float32
+                        data = DataPacket.from_bytes(packet_bytes)
+                        payload = data.payload
+                        payload_bytes = payload.tobytes() if isinstance(payload, memoryview) else payload
+                        decoded_iq = payload_as_numpy(payload_bytes, last_payload_format)
 
             self.assertIsNotNone(decoded_iq, "No data packet decoded from test file")
             iq_array = decoded_iq
