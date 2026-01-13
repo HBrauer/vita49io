@@ -29,8 +29,10 @@ def _validate_supported(
     """
     if pf.packing_method != PackingMethod.PROCESSING_EFFICIENT:
         raise ValueError("Unsupported packing method: only Processing-efficient is supported")
-    if pf.sample_type != SampleType.COMPLEX_CARTESIAN:
-        raise ValueError("Unsupported sample type: only Complex Cartesian (I/Q) is supported")
+    if pf.sample_type not in (SampleType.COMPLEX_CARTESIAN, SampleType.REAL):
+        raise ValueError(
+            "Unsupported sample type: only Complex Cartesian (I/Q) and Real are supported"
+        )
     if pf.sample_component_repeat:
         raise ValueError("Unsupported sample-component repeat: must be false")
     if pf.event_tag_size_bits != 0 or pf.channel_tag_size_bits != 0:
@@ -92,7 +94,7 @@ def payload_as_numpy(
 
     Supported Formats:
         - Packing method: Processing-efficient only.
-        - Sample type: Complex Cartesian (I/Q) only.
+        - Sample type: Complex Cartesian (I/Q) or Real.
         - Data item formats:
             - IEEE754 single (32-bit float, 32-bit field).
             - Signed fixed-point (16/24/32-bit items in 16/32-bit fields).
@@ -101,10 +103,14 @@ def payload_as_numpy(
     """
     ipf, di, fmt = _validate_supported(pf, validate_strict=validate_strict)
 
+    sample_type = pf.sample_type
+
     # Fast paths for common full-width cases
     if ipf == 32 and di == 32:
         if fmt == DataItemFormat.IEEE754_SINGLE:
             floats = np.frombuffer(payload, dtype=">f4")
+            if sample_type == SampleType.REAL:
+                return floats.astype(np.float32)
             if floats.size % 2 != 0:
                 raise ValueError("Payload does not contain an even number of components for I/Q")
             iq = floats.reshape(-1, 2).astype(np.float32)
@@ -151,6 +157,9 @@ def payload_as_numpy(
         else:
             raise ValueError(f"Internal error: unexpected format in fixed-point decoder: {pf}")
 
+    if sample_type == SampleType.REAL:
+        return vals.astype(np.float32)
+
     # Convert interleaved I/Q components to complex samples.
     if vals.size % 2 != 0:
         raise ValueError("Payload does not contain an even number of components for I/Q")
@@ -182,7 +191,7 @@ def payload_as_numpy_view(
 
     Supported Formats:
         - Packing method: Processing-efficient only.
-        - Sample type: Complex Cartesian (I/Q) only.
+        - Sample type: Complex Cartesian (I/Q) or Real.
         - Data item formats:
             - IEEE754 single (32-bit float, 32-bit field) yields a `>c8` view.
             - Signed fixed-point (16/24/32-bit items in 16/32-bit fields).
@@ -190,7 +199,10 @@ def payload_as_numpy_view(
         - Fixed-point yields integer views; 16-in-32 returns lower 16 bits.
     """
     ipf, di, fmt = _validate_supported(pf, validate_strict=validate_strict)
+    sample_type = pf.sample_type
     if fmt == DataItemFormat.IEEE754_SINGLE:
+        if sample_type == SampleType.REAL:
+            return np.frombuffer(payload, dtype=">f4")
         if len(payload) % 8 != 0:
             raise ValueError("Payload does not contain an even number of components for I/Q")
         return np.frombuffer(payload, dtype=">c8")
@@ -198,6 +210,8 @@ def payload_as_numpy_view(
         dtype = ">i2" if fmt == DataItemFormat.SIGNED_FIXED_POINT else ">u2"
         # 32-bit fields store the data item in the lower 16 bits (big-endian).
         vals16 = np.frombuffer(payload, dtype=dtype)[1::2]
+        if sample_type == SampleType.REAL:
+            return vals16
         if vals16.size % 2 != 0:
             raise ValueError("Payload does not contain an even number of components for I/Q")
         return vals16.reshape(-1, 2)
@@ -215,6 +229,8 @@ def payload_as_numpy_view(
         dtype = ">u2" if ipf == 16 else ">u4"
 
     vals = np.frombuffer(payload, dtype=dtype)
+    if sample_type == SampleType.REAL:
+        return vals
     if vals.size % 2 != 0:
         raise ValueError("Payload does not contain an even number of components for I/Q")
     return vals.reshape(-1, 2)
@@ -242,7 +258,7 @@ def payload_from_numpy(
 
     Supported Formats:
         - Packing method: Processing-efficient only.
-        - Sample type: Complex Cartesian (I/Q) only.
+        - Sample type: Complex Cartesian (I/Q) or Real.
         - Data item formats:
             - IEEE754 single (32-bit float, 32-bit field).
             - Signed fixed-point (16/24/32-bit items in 16/32-bit fields).
@@ -257,19 +273,26 @@ def payload_from_numpy(
     """
     ipf, di, fmt = _validate_supported(pf, validate_strict=validate_strict)
 
-    # Normalize input to (N, 2) float32 I/Q components for encoding paths.
+    sample_type = pf.sample_type
+
+    # Normalize input to float32 components for encoding paths.
     arr = np.asarray(samples)
-    if arr.dtype.kind == "c":
-        I = arr.real.astype(np.float32)
-        Q = arr.imag.astype(np.float32)
-        vec = np.stack([I, Q], axis=1)
+    if sample_type == SampleType.REAL:
+        if arr.dtype.kind == "c":
+            raise ValueError("Sample array must be real-valued for SampleType.REAL")
+        vals = arr.astype(np.float32).reshape(-1)
     else:
-        vec = arr.astype(np.float32)
-        if vec.ndim == 1:
-            raise ValueError("Sample array must be complex or shape (N,2)")
-        if vec.shape[-1] != 2:
-            raise ValueError("Sample array last dimension must be 2 (I,Q)")
-    vals = vec.reshape(-1).astype(np.float32)
+        if arr.dtype.kind == "c":
+            I = arr.real.astype(np.float32)
+            Q = arr.imag.astype(np.float32)
+            vec = np.stack([I, Q], axis=1)
+        else:
+            vec = arr.astype(np.float32)
+            if vec.ndim == 1:
+                raise ValueError("Sample array must be complex or shape (N,2)")
+            if vec.shape[-1] != 2:
+                raise ValueError("Sample array last dimension must be 2 (I,Q)")
+        vals = vec.reshape(-1).astype(np.float32)
 
     # Fast path: 32-bit fields
     if ipf == 32 and di == 32:
