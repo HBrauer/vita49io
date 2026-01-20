@@ -672,7 +672,7 @@ class CIF0Fields:
     if_band_offset_hz: float | None = None
     # Bit 24 (1 word, s16 fp7 in low 16 bits)
     reference_level_dbm: float | None = None
-    # Bit 23 (1 word, two s16 fp7)
+    # Bit 23 (1 word, two s16 fp7) - 9.5.3 Gain/Attenuation Field
     gain_db: Tuple[float, float] | None = None  # (stage1, stage2)
     # Bit 22 (1 word u32)
     over_range_count: int | None = None
