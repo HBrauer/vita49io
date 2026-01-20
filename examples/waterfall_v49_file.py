@@ -22,11 +22,10 @@ def read_packets_with_iq(path: str):
         .first_sample_rate_hz
         .first_rf_reference_frequency_hz
     """
-    from vita49io.protocol.core import Header
-    from vita49io.protocol.enums import PacketType
     from vita49io.protocol.data_packet import DataPacket
     from vita49io.protocol.context_packet import ContextPacket
     from vita49io.protocol.cif0 import PayloadFormat
+    from vita49io.io.packet_reader import PacketReader
     from vita49io.io.payload_codec import payload_as_numpy
 
     def _pkt_time_s(integer_seconds: Optional[int], fractional_seconds: Optional[int]) -> Optional[float]:
@@ -47,34 +46,14 @@ def read_packets_with_iq(path: str):
 
         def __iter__(self):
             with open(self.path, "rb") as f:
+                reader = PacketReader(f)
                 index = 0
                 while True:
-                    w0_bytes = f.read(4)
-                    if not w0_bytes:
+                    pkt = reader.read_packet()
+                    if pkt is None:
                         break
-                    if len(w0_bytes) != 4:
-                        raise ValueError(
-                            f"Truncated header at packet {index}: expected 4 bytes, got {len(w0_bytes)}"
-                        )
 
-                    w0 = int.from_bytes(w0_bytes, byteorder="big")
-                    header = Header.parse(w0)
-                    total_words = header.packet_size
-                    if total_words <= 0:
-                        raise ValueError(
-                            f"Invalid packet size (words) at packet {index}: {total_words}"
-                        )
-
-                    remaining_bytes = (total_words - 1) * 4
-                    rest = f.read(remaining_bytes)
-                    if len(rest) != remaining_bytes:
-                        raise ValueError(
-                            f"Truncated packet {index}: expected {remaining_bytes} bytes after header, got {len(rest)}"
-                        )
-                    packet_bytes = w0_bytes + rest
-
-                    if header.packet_type == PacketType.CONTEXT_PACKET:
-                        pkt = ContextPacket.from_bytes(packet_bytes)
+                    if isinstance(pkt, ContextPacket):
                         if pkt.cif0 is not None:
                             if pkt.cif0.payload_format is not None:
                                 self._last_payload_format = pkt.cif0.payload_format
@@ -93,15 +72,9 @@ def read_packets_with_iq(path: str):
                             if self.first_timestamp_s is None:
                                 self.first_timestamp_s = t_ctx
                             self.last_timestamp_s = t_ctx
-                    elif header.packet_type in (
-                        PacketType.IF_DATA_WITHOUT_STREAM_ID,
-                        PacketType.IF_DATA_WITH_STREAM_ID,
-                        PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
-                        PacketType.EXTENSION_DATA_WITH_STREAM_ID,
-                    ):
+                    elif isinstance(pkt, DataPacket):
                         if self._last_payload_format is None:
                             continue
-                        pkt = DataPacket.from_bytes(packet_bytes)
                         payload = pkt.payload
                         payload_bytes = payload.tobytes() if isinstance(payload, memoryview) else payload
                         iq = payload_as_numpy(payload_bytes, self._last_payload_format)
