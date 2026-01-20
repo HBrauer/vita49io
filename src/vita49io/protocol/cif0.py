@@ -208,20 +208,20 @@ class PayloadFormat:
         1
     """
     # Word 1 fields (bit positions per spec)
-    packing_method: PackingMethod  # 0=processing-efficient, 1=link-efficient
-    sample_type: SampleType  # 0=real, 1=complex cartesian, 2=complex polar
+    packing_method: PackingMethod = PackingMethod.PROCESSING_EFFICIENT  # 0=processing-efficient, 1=link-efficient
+    sample_type: SampleType = SampleType.COMPLEX_CARTESIAN  # 0=real, 1=complex cartesian, 2=complex polar
     # Data item format enum
-    data_item_format: DataItemFormat
-    sample_component_repeat: bool  # if True, components repeat (I,I,... then Q,Q,...)
-    event_tag_size_bits: int  # 0..7
-    channel_tag_size_bits: int  # 0..15
-    data_item_fraction_size_bits: int  # 0..15
-    item_packing_field_size_bits: int  # decoded size in bits (1..64)
-    data_item_size_bits: int  # decoded size in bits (1..64)
+    data_item_format: DataItemFormat = DataItemFormat.IEEE754_SINGLE
+    sample_component_repeat: bool = False  # if True, components repeat (I,I,... then Q,Q,...)
+    event_tag_size_bits: int = 0  # 0..7
+    channel_tag_size_bits: int = 0  # 0..15
+    data_item_fraction_size_bits: int = 32  # 0..15
+    item_packing_field_size_bits: int = 32  # decoded size in bits (1..64)
+    data_item_size_bits: int = 32  # decoded size in bits (1..64)
 
     # Word 2 fields
-    repeat_count: int  # decoded (1..65536)
-    vector_size: int  # decoded (1..65536)
+    repeat_count: int = 1  # decoded (1..65536)
+    vector_size: int = 1  # decoded (1..65536)
 
     def __post_init__(self) -> None:
         if not isinstance(self.data_item_format, DataItemFormat):
