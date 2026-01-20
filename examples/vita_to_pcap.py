@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 import sys
 import os
-from struct import unpack
 from scapy.all import Ether, IP, UDP, Raw, wrpcap
+
+from vita49io.io.packet_reader import PacketReader
 
 def vita_to_pcap(input_path):
     output_path = input_path + ".pcap"
@@ -15,30 +16,24 @@ def vita_to_pcap(input_path):
     dport = 4991
     print(f"Reading VITA packets from {input_path}...")
     with open(input_path, "rb") as f:
+        reader = PacketReader(f)
         while True:
-            hdr = f.read(4)
-            if not hdr:
-                break
-            if len(hdr) < 4:
-                print("Warning: file ends with incomplete header")
+            try:
+                pkt_obj = reader.read_packet()
+            except ValueError as exc:
+                print(f"Warning: {exc}")
                 break
 
-            word0, = unpack(">I", hdr)   # VITA is big-endian
-            pkt_words = word0 & 0xFFFF   # lower 16 bits = packet size (in 32-bit words)
-            total_bytes = pkt_words * 4
+            if pkt_obj is None:
+                break
+
+            header = pkt_obj.header
+            word0 = header.pack()
+            total_bytes = header.packet_size * 4
             print(f"word0 = 0x{word0:08X}")
-            print(f"Read packet with size {pkt_words} words ({total_bytes} bytes)")
+            print(f"Read packet with size {header.packet_size} words ({total_bytes} bytes)")
 
-            if total_bytes < 4:
-                print("Warning: invalid packet size, skipping...")
-                continue
-
-            rest = f.read(total_bytes - 4)
-            if len(rest) != total_bytes - 4:
-                print("Warning: file ends with incomplete packet")
-                break
-
-            payload = hdr + rest
+            payload = pkt_obj.to_bytes()
             pkt = (
                 Ether() /
                 IP(src=src_ip, dst=dst_ip) /

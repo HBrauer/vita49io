@@ -126,9 +126,8 @@ def convert_vita_to_sigmf(
     """Stream IQ samples from input_path into SigMF outputs and return a summary."""
     _ensure_src_on_path()
     from vita49io.protocol.context_packet import ContextPacket
-    from vita49io.protocol.core import Header
     from vita49io.protocol.data_packet import DataPacket
-    from vita49io.protocol.enums import PacketType
+    from vita49io.io.packet_reader import PacketReader
     from vita49io.io.payload_codec import payload_as_numpy
 
     input_path = input_path.expanduser()
@@ -160,30 +159,16 @@ def convert_vita_to_sigmf(
     dtype_le_c8 = np.dtype("<c8")
 
     with input_path.open("rb") as f, data_path.open("wb") as out_f:
+        reader = PacketReader(f)
         packet_index = 0
         while True:
-            w0_bytes = f.read(4)
-            if not w0_bytes:
+            pkt = reader.read_packet()
+            
+            if pkt is None:
                 break
-            if len(w0_bytes) != 4:
-                raise ValueError(
-                    f"Truncated header at packet {packet_index}: expected 4 bytes, got {len(w0_bytes)}"
-                )
-            w0 = int.from_bytes(w0_bytes, byteorder="big")
-            header = Header.parse(w0)
-            total_words = header.packet_size
-            if total_words <= 0:
-                raise ValueError(f"Invalid packet size (words) at packet {packet_index}: {total_words}")
-            remaining_bytes = (total_words - 1) * 4
-            rest = f.read(remaining_bytes)
-            if len(rest) != remaining_bytes:
-                raise ValueError(
-                    f"Truncated packet {packet_index}: expected {remaining_bytes} bytes after header, got {len(rest)}"
-                )
-            packet_bytes = w0_bytes + rest
 
-            if header.packet_type == PacketType.CONTEXT_PACKET:
-                ctx = ContextPacket.from_bytes(packet_bytes)
+            if isinstance(pkt, ContextPacket):
+                ctx = pkt
                 context_packets += 1
                 if ctx.stream_id is not None:
                     stream_id = ctx.stream_id
@@ -204,17 +189,11 @@ def convert_vita_to_sigmf(
                 packet_index += 1
                 continue
 
-            if header.packet_type in (
-                PacketType.IF_DATA_WITHOUT_STREAM_ID,
-                PacketType.IF_DATA_WITH_STREAM_ID,
-                PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
-                PacketType.EXTENSION_DATA_WITH_STREAM_ID,
-            ):
+            if isinstance(pkt, DataPacket):
                 if last_payload_format is None:
                     skipped_packets += 1
                     packet_index += 1
                     continue
-                pkt = DataPacket.from_bytes(packet_bytes)
                 payload = pkt.payload
                 payload_bytes = payload.tobytes() if isinstance(payload, memoryview) else payload
                 iq = payload_as_numpy(payload_bytes, last_payload_format)

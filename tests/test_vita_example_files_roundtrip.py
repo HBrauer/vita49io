@@ -3,59 +3,28 @@ import io
 import tempfile
 import unittest
 
-from vita49io.protocol.core import Header
-from vita49io.protocol.enums import PacketType
 from vita49io.protocol.data_packet import DataPacket
 from vita49io.protocol.context_packet import ContextPacket
+from vita49io.io.packet_reader import PacketReader
 
 
 def _iter_packets(path: str):
     """Yield parsed packet objects from a VITA49 file.
 
-    Uses the header word to determine total packet size, then parses into
-    ContextPacket or DataPacket as appropriate.
+    Uses PacketReader to parse ContextPacket or DataPacket as appropriate.
     """
     with open(path, "rb") as f:
+        reader = PacketReader(f)
         index = 0
         while True:
-            w0_bytes = f.read(4)
-            if not w0_bytes:
+            pkt = reader.read_packet()
+            if pkt is None:
                 break  # EOF
-            if len(w0_bytes) != 4:
-                raise ValueError(
-                    f"Truncated header at packet {index}: expected 4 bytes, got {len(w0_bytes)}"
-                )
 
-            w0 = int.from_bytes(w0_bytes, byteorder="big")
-            header = Header.parse(w0)
-            total_words = header.packet_size
-            if total_words <= 0:
-                raise ValueError(
-                    f"Invalid packet size (words) at packet {index}: {total_words}"
-                )
-
-            remaining_bytes = (total_words - 1) * 4
-            rest = f.read(remaining_bytes)
-            if len(rest) != remaining_bytes:
-                raise ValueError(
-                    f"Truncated packet {index}: expected {remaining_bytes} bytes after header, got {len(rest)}"
-                )
-            packet_bytes = w0_bytes + rest
-
-            if header.packet_type == PacketType.CONTEXT_PACKET:
-                pkt = ContextPacket.from_bytes(packet_bytes)
+            if isinstance(pkt, (ContextPacket, DataPacket)):
                 yield pkt
-            elif header.packet_type in (
-                PacketType.IF_DATA_WITHOUT_STREAM_ID,
-                PacketType.IF_DATA_WITH_STREAM_ID,
-                PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
-                PacketType.EXTENSION_DATA_WITH_STREAM_ID,
-            ):
-                yield DataPacket.from_bytes(packet_bytes)
             else:
-                raise ValueError(
-                    f"Unsupported packet type at index {index}: {header.packet_type}"
-                )
+                raise ValueError(f"Unsupported packet type at index {index}: {type(pkt)}")
 
             index += 1
 

@@ -15,7 +15,7 @@ pf = PayloadFormat(
     item_packing_field_size_bits=32,
     data_item_size_bits=32,
     repeat_count=1,
-    vector_size=0,
+    vector_size=1,
 )
 
 # Define the Context Indicator Fields 

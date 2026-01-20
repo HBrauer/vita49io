@@ -17,23 +17,21 @@ from pathlib import Path
 import numpy as np
 from matplotlib import pyplot as plt
 
-from vita49io.protocol.core import Header
+from vita49io.io.packet_reader import PacketReader
 from vita49io.protocol.enums import PacketType
 from vita49io.protocol.data_packet import DataPacket
 
 
 def read_packets(path: Path):
     with path.open("rb") as f:
+        reader = PacketReader(f)
+        index = 0
         while True:
-            hdr_bytes = f.read(4)
-            if not hdr_bytes:
+            pkt = reader.read_packet()
+            if pkt is None:
                 break
-            w0 = int.from_bytes(hdr_bytes, "big")
-            header = Header.parse(w0)
-            rest = f.read((header.packet_size - 1) * 4)
-            if len(rest) != (header.packet_size - 1) * 4:
-                break
-            yield header, hdr_bytes + rest
+            yield pkt.header, pkt.to_bytes()
+            index += 1
 
 
 def collect_spectra(path: Path):

@@ -12,9 +12,9 @@ from vita49io.protocol.cif0 import (
     SampleType,
 )
 from vita49io.protocol.context_packet import ContextPacket
-from vita49io.protocol.core import Header
 from vita49io.protocol.data_packet import DataPacket
 from vita49io.protocol.enums import PacketType, TSI, TSF
+from vita49io.io.packet_reader import PacketReader
 from vita49io.io.payload_codec import payload_as_numpy, payload_from_numpy
 
 
@@ -90,24 +90,14 @@ class TestProcessingEfficientFile(unittest.TestCase):
             decoded_iq = None
 
             with path.open("rb") as f:
+                reader = PacketReader(f)
                 while True:
-                    header_bytes = f.read(4)
-                    if not header_bytes:
+                    pkt = reader.read_packet()
+                    if pkt is None:
                         break
 
-                    header_word = int.from_bytes(header_bytes, byteorder="big")
-                    header = Header.parse(header_word)
-                    payload_length_bytes = (header.packet_size - 1) * 4
-                    payload_bytes = f.read(payload_length_bytes)
-                    self.assertEqual(
-                        len(payload_bytes),
-                        payload_length_bytes,
-                        "Truncated packet payload while reading test file",
-                    )
-                    packet_bytes = header_bytes + payload_bytes
-
-                    if header.packet_type == PacketType.CONTEXT_PACKET:
-                        ctx = ContextPacket.from_bytes(packet_bytes)
+                    if isinstance(pkt, ContextPacket):
+                        ctx = pkt
                         self.assertIsNotNone(ctx.cif0)
                         self.assertIsNotNone(ctx.cif0.payload_format)
                         last_payload_format = ctx.cif0.payload_format
@@ -116,7 +106,7 @@ class TestProcessingEfficientFile(unittest.TestCase):
                             last_payload_format,
                             "Data packet encountered before payload format was defined",
                         )
-                        data = DataPacket.from_bytes(packet_bytes)
+                        data = pkt
                         payload = data.payload
                         payload_bytes = payload.tobytes() if isinstance(payload, memoryview) else payload
                         decoded_iq = payload_as_numpy(payload_bytes, last_payload_format)

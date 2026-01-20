@@ -7,9 +7,9 @@ import socket
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from struct import unpack
 from typing import Dict, Iterator, Optional
 
+from vita49io.io.packet_reader import PacketReader
 from vita49io.protocol.cif0 import PayloadFormat, SampleType
 from vita49io.protocol.context_packet import ContextPacket
 from vita49io.protocol.core import Header
@@ -66,27 +66,13 @@ def iter_vita_packets(path: Path) -> Iterator[bytes]:
     """Yield raw VITA 49 packets from *path* in the order they appear."""
     index = 0
     with path.open('rb') as f:
+        reader = PacketReader(f)
         while True:
-            header = f.read(4)
-            if not header:
+            pkt = reader.read_packet()
+            
+            if pkt is None:
                 break
-            if len(header) != 4:
-                raise ValueError(
-                    f'Truncated header at packet {index}: expected 4 bytes, got {len(header)}'
-                )
-            (word0,) = unpack('>I', header)
-            total_words = word0 & 0xFFFF  # lower 16 bits carry the packet length in 32-bit words
-            if total_words <= 0:
-                raise ValueError(
-                    f'Invalid packet size (words) at packet {index}: {total_words}'
-                )
-            payload_bytes = (total_words - 1) * 4
-            payload = f.read(payload_bytes)
-            if len(payload) != payload_bytes:
-                raise ValueError(
-                    f'Truncated packet {index}: expected {payload_bytes} bytes after header, got {len(payload)}'
-                )
-            yield header + payload
+            yield pkt.to_bytes()
             index += 1
 
 
@@ -360,4 +346,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == '__main__':
     raise SystemExit(main())
-
