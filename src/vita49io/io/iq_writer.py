@@ -94,6 +94,16 @@ class IQStreamWriter:
         >>> pkt = writer.build_data_packet(np.zeros(4, dtype=np.complex64))
         >>> pkt.stream_id
         1
+        >>> ctx1 = writer.build_context_packet()
+        >>> data1 = writer.build_data_packet(np.zeros(4, dtype=np.complex64))
+        >>> data2 = writer.build_data_packet(np.ones(4, dtype=np.complex64))
+        >>> ctx2 = writer.build_context_packet()
+        >>> data3 = writer.build_data_packet(np.zeros(4, dtype=np.complex64))
+        >>> data4 = writer.build_data_packet(np.zeros(4, dtype=np.complex64))
+        >>> packets = [ctx1, data1, data2, ctx2, data3, data4]
+        >>> stream_bytes = b"".join(p.to_bytes() for p in packets)
+        >>> len(stream_bytes) > 0
+        True
     """
 
     # Required
