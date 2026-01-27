@@ -67,6 +67,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.context_only and not isinstance(pkt, ContextPacket):
             continue
 
+        if isinstance(pkt, ContextPacket):
+            # Force CIF0 decoding so __repr__ shows parsed content.
+            _ = pkt.cif0
+
         print(header)
         print(pkt)
         count += 1

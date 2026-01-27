@@ -24,7 +24,7 @@ class PacketReader:
 
     def read_packet(self) -> ContextPacket | DataPacket | None:
         """Read and parse the next packet from the stream."""
-        w0_buf = _read_exact(self._stream, 4)
+        w0_buf = _read_exact(self._stream, 4, allow_eof=True)
         if not w0_buf:
             return None
 
@@ -55,21 +55,30 @@ class PacketReader:
         raise ValueError(f"Unsupported packet type: {header.packet_type}")
 
 
-def _read_exact(stream: Readable, n: int) -> bytes:
-    """Read exactly n bytes or raise if the stream is truncated."""
+def _read_exact(stream: Readable, n: int, *, allow_eof: bool = False) -> bytes:
+    """Read exactly n bytes or raise if the stream is truncated.
+
+    If allow_eof is True, return b"" when EOF is encountered before any bytes
+    are read. Partial reads still raise.
+    """
     if n == 0:
         return b""
 
     buf = bytearray(n)
     view = memoryview(buf)
-    _read_exact_into(stream, view)
+    nread = _read_exact_into(stream, view, allow_eof=allow_eof)
+    if allow_eof and nread == 0:
+        return b""
     return bytes(buf)
 
 
-def _read_exact_into(stream: Readable, view: memoryview) -> None:
-    """Fill the view completely or raise if the stream is truncated."""
+def _read_exact_into(stream: Readable, view: memoryview, *, allow_eof: bool = False) -> int:
+    """Fill the view completely or raise if the stream is truncated.
+
+    Returns the number of bytes read when allow_eof is True.
+    """
     if not view:
-        return
+        return 0
 
     remaining = len(view)
     offset = 0
@@ -91,6 +100,9 @@ def _read_exact_into(stream: Readable, view: memoryview) -> None:
             offset += len(chunk)
 
     if remaining != 0:
+        if allow_eof and offset == 0:
+            return 0
         raise ValueError(
             f"Truncated packet: expected {len(view)} bytes, got {len(view) - remaining}"
         )
+    return len(view)
