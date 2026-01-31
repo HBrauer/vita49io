@@ -9,6 +9,13 @@ from ..protocol.context_packet import ContextPacket
 from ..protocol.data_packet import DataPacket
 from ..protocol.enums import PacketType
 
+_DATA_PACKET_TYPES = (
+    PacketType.IF_DATA_WITHOUT_STREAM_ID,
+    PacketType.IF_DATA_WITH_STREAM_ID,
+    PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
+    PacketType.EXTENSION_DATA_WITH_STREAM_ID,
+)
+
 
 class Readable(Protocol):
     """Protocol for stream-like objects that provide read()."""
@@ -44,15 +51,80 @@ class PacketReader:
 
         if header.packet_type == PacketType.CONTEXT_PACKET:
             return ContextPacket.from_bytes(memoryview(packet_bytes))
-        if header.packet_type in (
-            PacketType.IF_DATA_WITHOUT_STREAM_ID,
-            PacketType.IF_DATA_WITH_STREAM_ID,
-            PacketType.EXTENSION_DATA_WITHOUT_STREAM_ID,
-            PacketType.EXTENSION_DATA_WITH_STREAM_ID,
-        ):
+        if header.packet_type in _DATA_PACKET_TYPES:
             return DataPacket.from_bytes(memoryview(packet_bytes))
 
         raise ValueError(f"Unsupported packet type: {header.packet_type}")
+
+    def skip_packets(self, n: int) -> int:
+        """Skip the next n packets, returning the number actually skipped."""
+        if n <= 0:
+            return 0
+
+        skipped = 0
+        while skipped < n:
+            header, w0_buf, total_bytes = _read_packet_header(self._stream)
+            if header is None:
+                break
+            _skip_exact(self._stream, total_bytes - len(w0_buf))
+            skipped += 1
+        return skipped
+
+    def skip_data_packets(self, n: int) -> int:
+        """Skip packets until n data packets have been skipped."""
+        if n <= 0:
+            return 0
+
+        skipped = 0
+        while skipped < n:
+            header, w0_buf, total_bytes = _read_packet_header(self._stream)
+            if header is None:
+                break
+            _skip_exact(self._stream, total_bytes - len(w0_buf))
+            if header.packet_type in _DATA_PACKET_TYPES:
+                skipped += 1
+        return skipped
+
+    def skip_context_packets(self, n: int) -> int:
+        """Skip packets until n context packets have been skipped."""
+        if n <= 0:
+            return 0
+
+        skipped = 0
+        while skipped < n:
+            header, w0_buf, total_bytes = _read_packet_header(self._stream)
+            if header is None:
+                break
+            _skip_exact(self._stream, total_bytes - len(w0_buf))
+            if header.packet_type == PacketType.CONTEXT_PACKET:
+                skipped += 1
+        return skipped
+
+    def skip_until_next_context_packet(self) -> ContextPacket | None:
+        """Skip packets until the next context packet, returning it if found."""
+        while True:
+            header, w0_buf, total_bytes = _read_packet_header(self._stream)
+            if header is None:
+                return None
+            if header.packet_type == PacketType.CONTEXT_PACKET:
+                packet_bytes = bytearray(total_bytes)
+                packet_bytes[:4] = w0_buf
+                _read_exact_into(self._stream, memoryview(packet_bytes)[4:])
+                return ContextPacket.from_bytes(memoryview(packet_bytes))
+            _skip_exact(self._stream, total_bytes - len(w0_buf))
+
+    def skip_until_next_data_packet(self) -> DataPacket | None:
+        """Skip packets until the next data packet, returning it if found."""
+        while True:
+            header, w0_buf, total_bytes = _read_packet_header(self._stream)
+            if header is None:
+                return None
+            if header.packet_type in _DATA_PACKET_TYPES:
+                packet_bytes = bytearray(total_bytes)
+                packet_bytes[:4] = w0_buf
+                _read_exact_into(self._stream, memoryview(packet_bytes)[4:])
+                return DataPacket.from_bytes(memoryview(packet_bytes))
+            _skip_exact(self._stream, total_bytes - len(w0_buf))
 
 
 def _read_exact(stream: Readable, n: int, *, allow_eof: bool = False) -> bytes:
@@ -70,6 +142,35 @@ def _read_exact(stream: Readable, n: int, *, allow_eof: bool = False) -> bytes:
     if allow_eof and nread == 0:
         return b""
     return bytes(buf)
+
+
+def _read_packet_header(stream: Readable) -> tuple[Header | None, bytes, int]:
+    """Read the next packet header, returning (header, w0_buf, total_bytes)."""
+    w0_buf = _read_exact(stream, 4, allow_eof=True)
+    if not w0_buf:
+        return None, b"", 0
+    if len(w0_buf) != 4:
+        raise ValueError(f"Truncated header: expected 4 bytes, got {len(w0_buf)}")
+
+    w0 = int.from_bytes(w0_buf, byteorder="big")
+    header = Header.parse(w0)
+    total_words = header.packet_size
+    if total_words <= 0:
+        raise ValueError(f"Invalid packet size (words): {total_words}")
+    return header, w0_buf, total_words * 4
+
+
+def _skip_exact(stream: Readable, n: int) -> None:
+    """Read and discard exactly n bytes."""
+    if n <= 0:
+        return
+    buf = bytearray(min(65536, n))
+    view = memoryview(buf)
+    remaining = n
+    while remaining > 0:
+        chunk = min(remaining, len(buf))
+        _read_exact_into(stream, view[:chunk])
+        remaining -= chunk
 
 
 def _read_exact_into(stream: Readable, view: memoryview, *, allow_eof: bool = False) -> int:
