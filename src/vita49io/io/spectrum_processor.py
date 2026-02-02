@@ -327,6 +327,8 @@ class SpectrumStreamProcessor:
         overlap_samples = max(self.fft_size - self.hop_size, 0)
         span_hz = self._sample_rate_hz if self.band_mode == "full" else self._bandwidth_hz
 
+        resolution_hz = span_hz / float(self.output_bins) if self.output_bins > 0 else 0.0
+
         return SpectrumField(
             spectrum_type=SpectrumType.LOG_POWER_DB,
             averaging_type=averaging_type,
@@ -334,7 +336,7 @@ class SpectrumStreamProcessor:
             window_type=window_type_code,
             num_transform_points=self.fft_size,
             num_window_points=self.fft_size,
-            resolution_hz=self._sample_rate_hz / float(self.fft_size),
+            resolution_hz=resolution_hz,
             span_hz=span_hz,
             number_of_averages=number_of_averages,
             weighting_factor=weighting_factor,

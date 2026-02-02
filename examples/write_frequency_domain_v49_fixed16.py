@@ -42,31 +42,49 @@ def build_payload_format() -> "PayloadFormat":
     )
 
 
-def synthesize_iq(num_samples: int, sample_rate_hz: float, sim_time: float) -> np.ndarray:
-    """Generate synthetic IQ with drifting/pulsing tones plus noise."""
+def synthesize_iq(
+    num_samples: int,
+    sample_rate_hz: float,
+    sim_time: float,
+    *,
+    phase1: float,
+    phase2: float,
+) -> tuple[np.ndarray, float, float]:
+    """Generate synthetic IQ with drifting/pulsing tones plus noise (continuous phase)."""
     # Target levels (dBFS)
     noise_db = -100.0
     signal_db = -60.0
     noise_amp = 10.0 ** (noise_db / 20.0)
     signal_amp = 10.0 ** (signal_db / 20.0)
-    t = (np.arange(num_samples, dtype=np.float32) + sim_time * sample_rate_hz) / sample_rate_hz
 
     # Tone 1: drifting frequency (normalized to [-1, 1] like the JS bins)
-    freq1 = 0.2 + np.sin(sim_time * 0.1) * 0.3
-    f1_hz = freq1 * (sample_rate_hz / 2.0) * 0.7
-    tone1 = signal_amp * np.exp(2j * np.pi * f1_hz * t)
+    freq1 = 0.2 + np.sin(sim_time * 0.1) * 0.25
+    freq1 = max(min(freq1, 0.45), -0.45)
+    f1_hz = freq1 * (sample_rate_hz / 2.0)
+    w1 = 2.0 * np.pi * f1_hz / sample_rate_hz
 
-    # Tone 2: pulsing amplitude
-    freq2 = -0.2
+    # Tone 2: pulsing amplitude, move off Nyquist
+    freq2 = -0.45
     f2_hz = freq2 * (sample_rate_hz / 2.0)
+    w2 = 2.0 * np.pi * f2_hz / sample_rate_hz
+
+    idx = np.arange(num_samples, dtype=np.float32)
+    ph1 = phase1 + w1 * idx
+    ph2 = phase2 + w2 * idx
+
+    tone1 = signal_amp * np.exp(1j * ph1)
     amp2 = (np.sin(sim_time * 5.0) * 0.5 + 0.5) * signal_amp
-    tone2 = amp2 * np.exp(2j * np.pi * f2_hz * t)
+    tone2 = amp2 * np.exp(1j * ph2)
 
     noise_sigma = noise_amp / np.sqrt(2.0)
     noise = (np.random.standard_normal(num_samples) + 1j * np.random.standard_normal(num_samples)) * noise_sigma
 
     iq = (tone1 + tone2 + noise).astype(np.complex64)
-    return iq
+
+    # Advance phases for continuity
+    phase1 = float((phase1 + w1 * num_samples) % (2.0 * np.pi))
+    phase2 = float((phase2 + w2 * num_samples) % (2.0 * np.pi))
+    return iq, phase1, phase2
 
 
 def main(argv: list[str]) -> int:
@@ -101,7 +119,7 @@ def main(argv: list[str]) -> int:
     )
     cif0 = CIF0Fields(
         sample_rate_hz=sample_rate_hz,
-        bandwidth_hz=sample_rate_hz / 2.0,
+        bandwidth_hz=sample_rate_hz,
         payload_format=payload_format,
     )
     ctx = ContextPacket(
@@ -117,6 +135,8 @@ def main(argv: list[str]) -> int:
     start_epoch_s = 1_700_000_000.0
 
     first_iq: np.ndarray | None = None
+    phase1 = 0.0
+    phase2 = 0.0
     for frame_idx in range(num_frames):
         sim_time += frame_period_s
         frame_time = start_epoch_s + frame_idx * frame_period_s
@@ -136,7 +156,13 @@ def main(argv: list[str]) -> int:
         )
         packet_count += 1
 
-        iq = synthesize_iq(frame_size, sample_rate_hz, sim_time)
+        iq, phase1, phase2 = synthesize_iq(
+            frame_size,
+            sample_rate_hz,
+            sim_time,
+            phase1=phase1,
+            phase2=phase2,
+        )
         if first_iq is None:
             first_iq = iq.copy()
         payload = payload_from_numpy(iq, payload_format)

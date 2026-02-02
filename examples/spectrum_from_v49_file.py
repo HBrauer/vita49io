@@ -70,8 +70,8 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--averaging", choices=["none", "mean", "exponential"], default="mean")
     parser.add_argument("--averaging-param", type=float, default=4)
     parser.add_argument("--output-fps", type=float, default=10.0)
-    parser.add_argument("--output-bins", type=int, default=256)
-    parser.add_argument("--band-mode", choices=["inband", "full"], default="inband")
+    parser.add_argument("--output-bins", type=int, default=None)
+    parser.add_argument("--band-mode", choices=["inband", "full"], default="full")
     return parser.parse_args(argv)
 
 
@@ -87,6 +87,8 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     sample_rate_hz, center_hz = _read_first_context_info(args.input_file)
 
+    output_bins = args.output_bins if args.output_bins is not None else args.fft_size
+
     with open(args.input_file, "rb") as f:
         processor = SpectrumStreamProcessor(
             stream=f,
@@ -98,7 +100,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             if args.averaging == "mean"
             else float(args.averaging_param),
             output_fps=args.output_fps,
-            output_bins=args.output_bins,
+            output_bins=output_bins,
             band_mode=args.band_mode,
         )
 
