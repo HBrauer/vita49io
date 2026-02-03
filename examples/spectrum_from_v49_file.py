@@ -87,8 +87,6 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     sample_rate_hz, center_hz = _read_first_context_info(args.input_file)
 
-    output_bins = args.output_bins if args.output_bins is not None else args.fft_size
-
     with open(args.input_file, "rb") as f:
         processor = SpectrumStreamProcessor(
             stream=f,
@@ -100,7 +98,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             if args.averaging == "mean"
             else float(args.averaging_param),
             output_fps=args.output_fps,
-            output_bins=output_bins,
+            output_bins=args.output_bins,
             band_mode=args.band_mode,
         )
 

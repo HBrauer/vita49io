@@ -94,6 +94,8 @@ def main(argv: list[str]) -> int:
     from vita49io.protocol.core import Header
     from vita49io.io.payload_codec import payload_from_numpy
 
+    marker_only = "--marker-only" in argv
+    argv = [arg for arg in argv if arg != "--marker-only"]
     out_path = Path(argv[1]) if len(argv) > 1 else Path("iq_fixed16.v49")
     stream_id = 0x2468ACE1
     frame_period_s = 0.020
@@ -133,6 +135,40 @@ def main(argv: list[str]) -> int:
     out = bytearray(ctx.to_bytes())
     packet_count = 1
     start_epoch_s = 1_700_000_000.0
+
+    if marker_only:
+        data_header = Header(
+            packet_type=PacketType.IF_DATA_WITH_STREAM_ID,
+            class_id_present=False,
+            indicators_26=False,
+            indicators_25=False,
+            indicators_24=False,
+            tsi=TSI.UTC,
+            tsf=TSF.FRACTIONAL,
+            packet_count=packet_count & 0xF,
+            packet_size=0,
+        )
+        packet_count += 1
+
+        words = np.array([0x0123, 0x4567, 0x89AB, 0xCDEF], dtype=np.uint16)
+        signed = words.view(np.int16)
+        scaled = (signed.astype(np.float32) / float(1 << 15)).reshape(-1, 2)
+        marker_iq = (scaled[:, 0] + 1j * scaled[:, 1]).astype(np.complex64)
+        payload = payload_from_numpy(marker_iq, payload_format)
+        data_pkt = DataPacket(
+            header=data_header,
+            stream_id=stream_id,
+            integer_seconds=int(start_epoch_s),
+            fractional_seconds=0,
+            payload=payload,
+        )
+        out += data_pkt.to_bytes()
+        out_path.write_bytes(bytes(out))
+        print(f"Wrote marker-only IQ file to {out_path} ({len(out)} bytes)")
+        print("Marker samples (I/Q from hex words):")
+        for val in marker_iq:
+            print(f"  {val.real:+.6f} + {val.imag:+.6f}j")
+        return 0
 
     first_iq: np.ndarray | None = None
     phase1 = 0.0

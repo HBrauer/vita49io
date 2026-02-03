@@ -1,13 +1,35 @@
 #!/usr/bin/env python3
 import sys
 import os
+import argparse
 from scapy.all import Ether, IP, UDP, Raw, wrpcap
 
 from vita49io.io.packet_reader import PacketReader
 
-def vita_to_pcap(input_path):
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Convert a VITA 49 file to a PCAP capture",
+    )
+    parser.add_argument("input_file", help="Path to input VITA49 binary file")
+    parser.add_argument(
+        "-n",
+        "--max-packets",
+        type=int,
+        default=None,
+        help="Maximum number of packets to read (default: all)",
+    )
+    parser.add_argument(
+        "--context-only",
+        action="store_true",
+        help="Only include context packets (others are skipped)",
+    )
+    return parser.parse_args(argv)
+
+
+def vita_to_pcap(input_path, max_packets: int | None = None, context_only: bool = False):
     output_path = input_path + ".pcap"
     packets = []
+    count = 0
 
     # Example network wrapper config (adjust if you want different IP/ports)
     src_ip = "192.168.1.100"
@@ -27,6 +49,9 @@ def vita_to_pcap(input_path):
             if pkt_obj is None:
                 break
 
+            if context_only and pkt_obj.header.packet_type.name != "CONTEXT_PACKET":
+                continue
+
             header = pkt_obj.header
             word0 = header.pack()
             total_bytes = header.packet_size * 4
@@ -41,6 +66,9 @@ def vita_to_pcap(input_path):
                 Raw(payload)
             )
             packets.append(pkt)
+            count += 1
+            if max_packets is not None and count >= max_packets:
+                break
 
     if packets:
         wrpcap(output_path, packets)
@@ -49,7 +77,5 @@ def vita_to_pcap(input_path):
         print("No valid packets found, no file written")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print(f"Usage: {os.path.basename(sys.argv[0])} <input_file>")
-        sys.exit(1)
-    vita_to_pcap(sys.argv[1])
+    args = _parse_args(sys.argv[1:])
+    vita_to_pcap(args.input_file, args.max_packets, args.context_only)

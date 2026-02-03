@@ -1,4 +1,18 @@
-"""Stream VITA 49 IQ packets through a spectral processor and emit spectral packets."""
+"""Stream VITA 49 IQ packets through a spectral processor and emit spectral packets.
+
+This module wraps :class:`vita49io.signal.spectrum.SpectrumProcessor` so it can be
+fed by a VITA 49 packet stream and emit VITA 49 spectral packets. The core flow is:
+
+1. Read context packets to discover payload format, sample rate, and bandwidth.
+2. Decode IQ samples from data packets.
+3. Push IQ into the spectrum processor to produce spectral frames.
+4. Emit a single output context packet (once per config) followed by spectral data packets.
+
+The output spectral packets encode power spectra in dB with a REAL, IEEE754 float
+payload (big-endian float32). The output context packet includes CIF0/CIF1
+metadata describing the spectrum configuration (windowing, averaging, span,
+resolution).
+"""
 
 from __future__ import annotations
 
@@ -33,7 +47,76 @@ from .payload_codec import payload_as_numpy
 
 @dataclass
 class SpectrumStreamProcessor:
-    """Convert VITA 49 IQ streams into VITA 49 spectral data packets."""
+    """Convert VITA 49 IQ streams into VITA 49 spectral data packets.
+
+    Usage
+    -----
+    The processor consumes a readable byte stream of VITA 49 packets and exposes
+    a packet-by-packet interface that yields a new context packet plus spectral
+    data packets as soon as enough IQ samples have been buffered.
+
+    Example:
+    ```python
+    from vita49io.io.spectrum_processor import SpectrumStreamProcessor
+
+    with open("input.v49", "rb") as f:
+        processor = SpectrumStreamProcessor(
+            stream=f,
+            fft_size=1024,
+            hop_size=256,
+            window_type="hann",
+            averaging_mode="mean",
+            averaging_param=4,
+            output_fps=10.0,
+            output_bins=256,
+            band_mode="inband",
+        )
+        for pkt in processor.read_packets():
+            # pkt is either ContextPacket or DataPacket
+            handle(pkt)
+    ```
+
+    Parameters and behavior
+    -----------------------
+    - `stream`: Readable byte stream containing VITA 49 packets. The stream must be
+      seekable on initialization because the processor scans for the first context
+      packet with payload format, sample rate, and bandwidth, then rewinds.
+    - `fft_size`: FFT length in samples. Controls frequency resolution
+      (`sample_rate_hz / fft_size`) and the number of input samples required per
+      transform.
+    - `hop_size`: Advance in samples between consecutive FFTs. Smaller hop sizes
+      increase overlap and time resolution at the cost of more computation.
+    - `window_type`: `"hann"` or `"rect"`. A Hann window reduces spectral leakage
+      but widens the main lobe; a rectangular window preserves resolution but
+      leaks more.
+    - `averaging_mode` / `averaging_param`:
+      - `"none"`: no averaging. Each FFT power spectrum is emitted as-is.
+      - `"mean"`: arithmetic mean over `averaging_param` FFTs; `averaging_param`
+        must be a positive integer.
+      - `"exponential"`: exponential moving average with coefficient
+        `averaging_param` in (0, 1]. Smaller values smooth more but respond slower.
+    - `output_fps`: Target output frames per second. The processor emits spectra
+      on a time grid derived from the input sample rate, regardless of how many
+      FFTs were computed in that interval.
+    - `output_bins`: Number of frequency bins in the emitted spectrum. If `None`,
+      defaults to the native bin count (full band: `fft_size`; inband: the number
+      of FFT bins within `[-bandwidth/2, +bandwidth/2]`). If it differs from the
+      native bin count, the spectrum is linearly interpolated.
+    - `band_mode`:
+      - `"full"`: use the full Nyquist span `[-sample_rate_hz/2, +sample_rate_hz/2]`.
+      - `"inband"`: restrict to the context bandwidth `[-bandwidth_hz/2, +bandwidth_hz/2]`.
+    - `fft_kwargs`: Optional `scipy.fft.fft` keyword arguments forwarded to the FFT.
+    - `output_stream_id`: If set, overrides the input stream ID in output packets.
+
+    Context handling and resets
+    ---------------------------
+    - The first output packet emitted after spectral frames are available is a
+      context packet describing the spectrum metadata.
+    - If a new input context changes sample rate or bandwidth, a new internal
+      spectrum processor is created and a fresh context packet is emitted before
+      the next spectral data packet.
+    - `reset()` clears buffered samples, averaging state, and output packet count.
+    """
 
     stream: Readable
     fft_size: int
@@ -42,7 +125,7 @@ class SpectrumStreamProcessor:
     averaging_mode: str
     averaging_param: float | int
     output_fps: float
-    output_bins: int
+    output_bins: int | None = None
     band_mode: str = "inband"
     fft_kwargs: dict | None = None
     output_stream_id: int | None = None
@@ -303,6 +386,10 @@ class SpectrumStreamProcessor:
     def _build_spectrum_field(self) -> SpectrumField:
         if self._sample_rate_hz is None or self._bandwidth_hz is None:
             raise ValueError("Spectrum processor not initialized")
+        if self._processor is None:
+            raise ValueError("Spectrum processor not initialized")
+
+        output_bins = self._processor.output_bins
 
         if self.window_type == "hann":
             window_type_code = 2
@@ -327,7 +414,7 @@ class SpectrumStreamProcessor:
         overlap_samples = max(self.fft_size - self.hop_size, 0)
         span_hz = self._sample_rate_hz if self.band_mode == "full" else self._bandwidth_hz
 
-        resolution_hz = span_hz / float(self.output_bins)
+        resolution_hz = span_hz / float(output_bins)
 
         return SpectrumField(
             spectrum_type=SpectrumType.LOG_POWER_DB,
@@ -341,7 +428,7 @@ class SpectrumStreamProcessor:
             number_of_averages=number_of_averages,
             weighting_factor=weighting_factor,
             f1_index=0,
-            f2_index=max(self.output_bins - 1, 0),
+            f2_index=max(output_bins - 1, 0),
             window_time_delta=overlap_samples,
         )
 

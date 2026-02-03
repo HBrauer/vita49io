@@ -7,6 +7,20 @@ import numpy as np
 from scipy.fft import fft, fftfreq, fftshift
 
 
+def _default_output_bins(
+    sample_rate_hz: float,
+    bandwidth_hz: float,
+    band_mode: str,
+    fft_size: int,
+) -> int:
+    if band_mode == "full":
+        return int(fft_size)
+    freqs = fftshift(fftfreq(fft_size, d=1.0 / float(sample_rate_hz)))
+    half_bw = float(bandwidth_hz) / 2.0
+    mask = (freqs >= -half_bw) & (freqs <= half_bw)
+    return int(np.count_nonzero(mask))
+
+
 @dataclass
 class SpectrumFrame:
     timestamp: float
@@ -27,7 +41,7 @@ class SpectrumProcessor:
         averaging_mode: str,
         averaging_param: float | int,
         output_fps: float,
-        output_bins: int,
+        output_bins: int | None,
         fft_kwargs: dict | None = None,
     ) -> None:
         if sample_rate_hz <= 0:
@@ -40,6 +54,13 @@ class SpectrumProcessor:
             raise ValueError("hop_size must be > 0")
         if output_fps <= 0:
             raise ValueError("output_fps must be > 0")
+        if output_bins is None:
+            output_bins = _default_output_bins(
+                sample_rate_hz=sample_rate_hz,
+                bandwidth_hz=bandwidth_hz,
+                band_mode=band_mode,
+                fft_size=fft_size,
+            )
         if output_bins <= 0:
             raise ValueError("output_bins must be > 0")
         if band_mode not in {"full", "inband"}:

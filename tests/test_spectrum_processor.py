@@ -40,7 +40,6 @@ class TestSpectrumStreamProcessor(unittest.TestCase):
             averaging_mode="mean",
             averaging_param=2,
             output_fps=sample_rate_hz / 8,
-            output_bins=16,
             band_mode="inband",
         )
 
@@ -68,12 +67,16 @@ class TestSpectrumStreamProcessor(unittest.TestCase):
         self.assertEqual(ctx_out.cif0.cif1.spectrum.window_type, 2)
         self.assertEqual(ctx_out.cif0.cif1.spectrum.span_hz, bandwidth_hz)
 
+        freqs = np.fft.fftshift(np.fft.fftfreq(16, d=1.0 / sample_rate_hz))
+        half_bw = bandwidth_hz / 2.0
+        expected_bins = int(np.count_nonzero((freqs >= -half_bw) & (freqs <= half_bw)))
+
         for pkt in data_packets:
             self.assertTrue(pkt.header.indicators_24, "Output data packet missing S-bit")
             payload = pkt.payload
             payload_bytes = payload.tobytes() if isinstance(payload, memoryview) else payload
             vals = np.frombuffer(payload_bytes, dtype=">f4")
-            self.assertEqual(vals.size, 16)
+            self.assertEqual(vals.size, expected_bins)
 
 
 if __name__ == "__main__":
