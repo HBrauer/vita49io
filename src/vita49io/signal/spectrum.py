@@ -5,6 +5,7 @@ from typing import Any
 
 import numpy as np
 from scipy.fft import fft, fftfreq, fftshift
+from scipy.signal import windows
 
 
 def _default_output_bins(
@@ -43,6 +44,9 @@ class SpectrumProcessor:
         output_fps: float,
         output_bins: int | None,
         fft_kwargs: dict | None = None,
+        *,
+        window_param: float | None = None,
+        dc_block: bool = False,
     ) -> None:
         if sample_rate_hz <= 0:
             raise ValueError("sample_rate_hz must be > 0")
@@ -65,10 +69,17 @@ class SpectrumProcessor:
             raise ValueError("output_bins must be > 0")
         if band_mode not in {"full", "inband"}:
             raise ValueError("band_mode must be 'full' or 'inband'")
-        if window_type not in {"hann", "rect"}:
-            raise ValueError("window_type must be 'hann' or 'rect'")
-        if averaging_mode not in {"none", "mean", "exponential"}:
-            raise ValueError("averaging_mode must be 'none', 'mean', or 'exponential'")
+        if window_type not in {"hann", "rect", "blackmanharris", "kaiser"}:
+            raise ValueError("window_type must be 'hann', 'rect', 'blackmanharris', or 'kaiser'")
+        if window_type == "kaiser" and window_param is not None and window_param <= 0:
+            raise ValueError("window_param must be > 0 for kaiser")
+        if not isinstance(dc_block, bool):
+            raise ValueError("dc_block must be a bool")
+        if averaging_mode not in {"none", "mean", "frame_mean", "exponential", "exponential_tau", "peak_hold"}:
+            raise ValueError(
+                "averaging_mode must be one of: "
+                "'none', 'mean', 'frame_mean', 'exponential', 'exponential_tau', 'peak_hold'"
+            )
         if averaging_mode == "mean":
             if not isinstance(averaging_param, int) or averaging_param <= 0:
                 raise ValueError("averaging_param must be a positive int for mean")
@@ -77,6 +88,11 @@ class SpectrumProcessor:
                 raise ValueError("averaging_param must be a float in (0, 1] for exponential")
             if not (0 < float(averaging_param) <= 1.0):
                 raise ValueError("averaging_param must be in (0, 1] for exponential")
+        if averaging_mode == "exponential_tau":
+            if not isinstance(averaging_param, (float, int)):
+                raise ValueError("averaging_param must be a float > 0 (seconds) for exponential_tau")
+            if not (float(averaging_param) > 0.0):
+                raise ValueError("averaging_param must be > 0 (seconds) for exponential_tau")
         if fft_kwargs is not None and not isinstance(fft_kwargs, dict):
             raise ValueError("fft_kwargs must be a dict or None")
 
@@ -86,6 +102,8 @@ class SpectrumProcessor:
         self.fft_size = int(fft_size)
         self.hop_size = int(hop_size)
         self.window_type = window_type
+        self.window_param = window_param
+        self.dc_block = dc_block
         self.averaging_mode = averaging_mode
         self.averaging_param = averaging_param
         self.output_fps = float(output_fps)
@@ -94,8 +112,22 @@ class SpectrumProcessor:
 
         if window_type == "hann":
             self._window = np.hanning(self.fft_size).astype(np.float32)
-        else:
+        elif window_type == "rect":
             self._window = np.ones(self.fft_size, dtype=np.float32)
+        elif window_type == "blackmanharris":
+            self._window = windows.blackmanharris(self.fft_size).astype(np.float32)
+        else:
+            beta = 8.0 if window_param is None else float(window_param)
+            self._window = np.kaiser(self.fft_size, beta).astype(np.float32)
+
+        # Keep float64 here so the inband mask and default output bin count are consistent
+        # across platforms/precisions (avoids accidental "default interpolation" off-by-one).
+        self._freqs = fftshift(fftfreq(self.fft_size, d=1.0 / self.sample_rate_hz))
+        if self.band_mode == "full":
+            self._band_mask: np.ndarray | None = None
+        else:
+            half_bw = self.bandwidth_hz / 2.0
+            self._band_mask = (self._freqs >= -half_bw) & (self._freqs <= half_bw)
 
         self._reset_state()
 
@@ -112,6 +144,10 @@ class SpectrumProcessor:
         self._mean_count = 0
         self._ema_state: np.ndarray | None = None
         self._ema_count = 0
+        self._peak_hold: np.ndarray | None = None
+        self._peak_hold_count = 0
+        self._frame_sum: np.ndarray | None = None
+        self._frame_count = 0
 
     def push(self, iq: np.ndarray) -> list[SpectrumFrame]:
         iq_array = np.asarray(iq)
@@ -128,6 +164,9 @@ class SpectrumProcessor:
         frames: list[SpectrumFrame] = []
         while self._buffer_start + self.fft_size <= self._buffer.size:
             segment = self._buffer[self._buffer_start : self._buffer_start + self.fft_size]
+            if self.dc_block:
+                mean = segment.mean(dtype=np.complex64)
+                segment = segment - mean
             windowed = segment * self._window
             spectrum = fft(windowed, n=self.fft_size, **self.fft_kwargs)
             power = (np.abs(spectrum) ** 2).astype(np.float32)
@@ -164,8 +203,30 @@ class SpectrumProcessor:
                 self._mean_sum += power
                 self._mean_count += 1
             return
+        if self.averaging_mode == "peak_hold":
+            if self._peak_hold is None:
+                self._peak_hold = power.astype(np.float32)
+            else:
+                self._peak_hold = np.maximum(self._peak_hold, power)
+            self._peak_hold_count += 1
+            return
 
-        alpha = float(self.averaging_param)
+        if self.averaging_mode == "frame_mean":
+            if self._frame_sum is None:
+                self._frame_sum = power.astype(np.float32)
+                self._frame_count = 1
+            else:
+                self._frame_sum += power
+                self._frame_count += 1
+            return
+
+        if self.averaging_mode == "exponential":
+            alpha = float(self.averaging_param)
+        else:
+            tau = float(self.averaging_param)
+            dt_s = float(self.hop_size) / float(self.sample_rate_hz)
+            alpha = 1.0 - float(np.exp(-dt_s / tau))
+
         if self._ema_state is None:
             self._ema_state = power.astype(np.float32)
             self._ema_count = 1
@@ -188,6 +249,20 @@ class SpectrumProcessor:
             self._mean_count = 0
             return mean_power, count
 
+        if self.averaging_mode == "peak_hold":
+            if self._peak_hold is None:
+                return None, 0
+            return self._peak_hold, max(self._peak_hold_count, 1)
+
+        if self.averaging_mode == "frame_mean":
+            if self._frame_sum is None or self._frame_count == 0:
+                return None, 0
+            mean_power = self._frame_sum / float(self._frame_count)
+            count = self._frame_count
+            self._frame_sum = None
+            self._frame_count = 0
+            return mean_power, count
+
         if self._ema_state is None:
             return None, 0
         return self._ema_state, self._ema_count
@@ -197,17 +272,14 @@ class SpectrumProcessor:
         if power is None:
             return None
 
-        freqs = fftshift(fftfreq(self.fft_size, d=1.0 / self.sample_rate_hz))
         power_shifted = fftshift(power)
 
-        if self.band_mode == "full":
-            freqs_band = freqs
+        if self._band_mask is None:
+            freqs_band = self._freqs
             power_band = power_shifted
         else:
-            half_bw = self.bandwidth_hz / 2.0
-            mask = (freqs >= -half_bw) & (freqs <= half_bw)
-            freqs_band = freqs[mask]
-            power_band = power_shifted[mask]
+            freqs_band = self._freqs[self._band_mask]
+            power_band = power_shifted[self._band_mask]
 
         if freqs_band.size == 0:
             return None
@@ -228,6 +300,7 @@ class SpectrumProcessor:
             "rbw_hz": self.sample_rate_hz / self.fft_size,
             "band_mode": self.band_mode,
             "bandwidth_hz": self.bandwidth_hz,
+            "dc_block": self.dc_block,
             "num_ffts_averaged": num_averaged,
             "fft_kwargs": dict(self.fft_kwargs),
         }
@@ -253,6 +326,8 @@ if __name__ == "__main__":
         fft_size=fft_size,
         hop_size=hop_size,
         window_type="hann",
+        window_param=None,
+        dc_block=False,
         averaging_mode="mean",
         averaging_param=4,
         output_fps=10.0,

@@ -65,10 +65,9 @@ class SpectrumStreamProcessor:
             fft_size=1024,
             hop_size=256,
             window_type="hann",
-            averaging_mode="mean",
-            averaging_param=4,
+            averaging_mode="frame_mean",
+            averaging_param=0,
             output_fps=10.0,
-            output_bins=256,
             band_mode="inband",
         )
         for pkt in processor.read_packets():
@@ -86,15 +85,25 @@ class SpectrumStreamProcessor:
       transform.
     - `hop_size`: Advance in samples between consecutive FFTs. Smaller hop sizes
       increase overlap and time resolution at the cost of more computation.
-    - `window_type`: `"hann"` or `"rect"`. A Hann window reduces spectral leakage
-      but widens the main lobe; a rectangular window preserves resolution but
-      leaks more.
+    - `window_type`: `"hann"`, `"rect"`, `"blackmanharris"`, or `"kaiser"`. A Hann
+      window reduces spectral leakage but widens the main lobe; a rectangular
+      window preserves resolution but leaks more. Blackman-Harris further reduces
+      sidelobes; Kaiser provides a tunable tradeoff.
+    - `window_param`: Optional window parameter. For `"kaiser"` this is the beta
+      value (default 8.0); otherwise ignored.
+    - `dc_block`: If True, subtract the mean from each FFT segment before windowing
+      to reduce the DC spike at the center bin (useful for wideband overview spectra).
     - `averaging_mode` / `averaging_param`:
       - `"none"`: no averaging. Each FFT power spectrum is emitted as-is.
       - `"mean"`: arithmetic mean over `averaging_param` FFTs; `averaging_param`
         must be a positive integer.
+      - `"frame_mean"`: average *all* FFTs that occur between emitted output frames
+        (Welch-style integration at `output_fps`). `averaging_param` is ignored.
       - `"exponential"`: exponential moving average with coefficient
         `averaging_param` in (0, 1]. Smaller values smooth more but respond slower.
+      - `"exponential_tau"`: exponential moving average with time constant in seconds
+        (`averaging_param` > 0). This is often easier to tune for long recordings.
+      - `"peak_hold"`: per-bin peak hold across FFTs since the last reset.
     - `output_fps`: Target output frames per second. The processor emits spectra
       on a time grid derived from the input sample rate, regardless of how many
       FFTs were computed in that interval.
@@ -127,6 +136,8 @@ class SpectrumStreamProcessor:
     output_fps: float
     output_bins: int | None = None
     band_mode: str = "inband"
+    window_param: float | None = None
+    dc_block: bool = False
     fft_kwargs: dict | None = None
     output_stream_id: int | None = None
 
@@ -247,6 +258,8 @@ class SpectrumStreamProcessor:
                 fft_size=self.fft_size,
                 hop_size=self.hop_size,
                 window_type=self.window_type,
+                window_param=self.window_param,
+                dc_block=self.dc_block,
                 averaging_mode=self.averaging_mode,
                 averaging_param=self.averaging_param,
                 output_fps=self.output_fps,
@@ -263,6 +276,8 @@ class SpectrumStreamProcessor:
                 fft_size=self.fft_size,
                 hop_size=self.hop_size,
                 window_type=self.window_type,
+                window_param=self.window_param,
+                dc_block=self.dc_block,
                 averaging_mode=self.averaging_mode,
                 averaging_param=self.averaging_param,
                 output_fps=self.output_fps,
@@ -284,6 +299,8 @@ class SpectrumStreamProcessor:
                 fft_size=self.fft_size,
                 hop_size=self.hop_size,
                 window_type=self.window_type,
+                window_param=self.window_param,
+                dc_block=self.dc_block,
                 averaging_mode=self.averaging_mode,
                 averaging_param=self.averaging_param,
                 output_fps=self.output_fps,
@@ -406,10 +423,29 @@ class SpectrumStreamProcessor:
             averaging_type = AveragingType.LINEAR
             number_of_averages = int(self.averaging_param)
             weighting_factor = 0
+        elif self.averaging_mode == "frame_mean":
+            averaging_type = AveragingType.LINEAR
+            nominal = int(
+                round(self._sample_rate_hz / (float(self.hop_size) * float(self.output_fps)))
+            )
+            number_of_averages = max(nominal, 1)
+            weighting_factor = 0
+        elif self.averaging_mode == "peak_hold":
+            averaging_type = AveragingType.PEAK_HOLD
+            number_of_averages = 1
+            weighting_factor = 0
+        elif self.averaging_mode == "exponential":
+            averaging_type = AveragingType.EXPONENTIAL
+            number_of_averages = 1
+            alpha = float(self.averaging_param)
+            weighting_factor = int(round(alpha * (1 << 16)))
         else:
             averaging_type = AveragingType.EXPONENTIAL
             number_of_averages = 1
-            weighting_factor = int(round(float(self.averaging_param) * (1 << 16)))
+            tau = float(self.averaging_param)
+            dt_s = float(self.hop_size) / float(self._sample_rate_hz)
+            alpha = 1.0 - float(np.exp(-dt_s / tau))
+            weighting_factor = int(round(alpha * (1 << 16)))
 
         overlap_samples = max(self.fft_size - self.hop_size, 0)
         span_hz = self._sample_rate_hz if self.band_mode == "full" else self._bandwidth_hz
