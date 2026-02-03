@@ -234,6 +234,53 @@ class TestSpectrumStreamProcessor(unittest.TestCase):
         n = frames[0].meta["num_ffts_averaged"]
         self.assertLessEqual(abs(int(n) - expected_nominal), 1)
 
+    def test_dbfs_scaling_tone(self) -> None:
+        # With dbfs scaling enabled, a full-scale bin-centered complex tone should
+        # land near 0 dBFS independent of fft_size. Raw scaling grows with fft_size.
+        sample_rate_hz = 1024.0
+        fft_size = 1024
+        hop_size = 1024
+        k = 17
+
+        n = np.arange(fft_size, dtype=np.float32)
+        tone = np.exp(2j * np.pi * k * n / float(fft_size)).astype(np.complex64)
+
+        proc_dbfs = SpectrumProcessor(
+            sample_rate_hz=sample_rate_hz,
+            bandwidth_hz=sample_rate_hz,
+            band_mode="full",
+            fft_size=fft_size,
+            hop_size=hop_size,
+            window_type="rect",
+            averaging_mode="none",
+            averaging_param=0,
+            output_fps=1.0,
+            output_bins=None,
+            power_scale="dbfs",
+        )
+        frames_dbfs = proc_dbfs.push(tone)
+        self.assertTrue(frames_dbfs, "No frames emitted for dbfs scaling")
+        peak_dbfs = float(np.max(frames_dbfs[0].spectrum_db))
+        self.assertLessEqual(abs(peak_dbfs - 0.0), 0.25)
+
+        proc_raw = SpectrumProcessor(
+            sample_rate_hz=sample_rate_hz,
+            bandwidth_hz=sample_rate_hz,
+            band_mode="full",
+            fft_size=fft_size,
+            hop_size=hop_size,
+            window_type="rect",
+            averaging_mode="none",
+            averaging_param=0,
+            output_fps=1.0,
+            output_bins=None,
+            power_scale="raw",
+        )
+        frames_raw = proc_raw.push(tone)
+        self.assertTrue(frames_raw, "No frames emitted for raw scaling")
+        peak_raw = float(np.max(frames_raw[0].spectrum_db))
+        self.assertGreater(peak_raw, 40.0)
+
 
 if __name__ == "__main__":
     unittest.main()

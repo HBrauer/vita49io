@@ -47,6 +47,7 @@ class SpectrumProcessor:
         *,
         window_param: float | None = None,
         dc_block: bool = False,
+        power_scale: str = "dbfs",
     ) -> None:
         if sample_rate_hz <= 0:
             raise ValueError("sample_rate_hz must be > 0")
@@ -93,6 +94,8 @@ class SpectrumProcessor:
                 raise ValueError("averaging_param must be a float > 0 (seconds) for exponential_tau")
             if not (float(averaging_param) > 0.0):
                 raise ValueError("averaging_param must be > 0 (seconds) for exponential_tau")
+        if power_scale not in {"raw", "dbfs"}:
+            raise ValueError("power_scale must be 'raw' or 'dbfs'")
         if fft_kwargs is not None and not isinstance(fft_kwargs, dict):
             raise ValueError("fft_kwargs must be a dict or None")
 
@@ -104,6 +107,7 @@ class SpectrumProcessor:
         self.window_type = window_type
         self.window_param = window_param
         self.dc_block = dc_block
+        self.power_scale = power_scale
         self.averaging_mode = averaging_mode
         self.averaging_param = averaging_param
         self.output_fps = float(output_fps)
@@ -119,6 +123,12 @@ class SpectrumProcessor:
         else:
             beta = 8.0 if window_param is None else float(window_param)
             self._window = np.kaiser(self.fft_size, beta).astype(np.float32)
+
+        # Coherent gain (sum of window weights). This normalizes a bin-centered tone's
+        # magnitude so results don't change with fft_size/window choice.
+        self._coherent_gain = float(np.sum(self._window, dtype=np.float64))
+        if self._coherent_gain <= 0.0:
+            raise ValueError("Internal error: window coherent gain must be > 0")
 
         # Keep float64 here so the inband mask and default output bin count are consistent
         # across platforms/precisions (avoids accidental "default interpolation" off-by-one).
@@ -292,6 +302,9 @@ class SpectrumProcessor:
             power_out = power_band.astype(np.float32)
             freqs_out = freqs_band.astype(np.float32)
 
+        if self.power_scale == "dbfs":
+            power_out = power_out / float(self._coherent_gain**2)
+
         spectrum_db = (10.0 * np.log10(power_out + 1e-20)).astype(np.float32)
 
         meta = {
@@ -301,6 +314,8 @@ class SpectrumProcessor:
             "band_mode": self.band_mode,
             "bandwidth_hz": self.bandwidth_hz,
             "dc_block": self.dc_block,
+            "power_scale": self.power_scale,
+            "coherent_gain": self._coherent_gain,
             "num_ffts_averaged": num_averaged,
             "fft_kwargs": dict(self.fft_kwargs),
         }

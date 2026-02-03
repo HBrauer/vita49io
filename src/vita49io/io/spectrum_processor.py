@@ -111,6 +111,10 @@ class SpectrumStreamProcessor:
       defaults to the native bin count (full band: `fft_size`; inband: the number
       of FFT bins within `[-bandwidth/2, +bandwidth/2]`). If it differs from the
       native bin count, the spectrum is linearly interpolated.
+    - `power_scale`: How to scale the emitted values:
+      - `"dbfs"` (default): normalize by the window coherent gain so a full-scale,
+        bin-centered tone is ~0 dB (typical "dBFS-like" spectrum display).
+      - `"raw"`: emit unnormalized FFT bin power in dB (values depend on FFT size/window).
     - `band_mode`:
       - `"full"`: use the full Nyquist span `[-sample_rate_hz/2, +sample_rate_hz/2]`.
       - `"inband"`: restrict to the context bandwidth `[-bandwidth_hz/2, +bandwidth_hz/2]`.
@@ -138,6 +142,7 @@ class SpectrumStreamProcessor:
     band_mode: str = "inband"
     window_param: float | None = None
     dc_block: bool = False
+    power_scale: str = "dbfs"
     fft_kwargs: dict | None = None
     output_stream_id: int | None = None
 
@@ -260,6 +265,7 @@ class SpectrumStreamProcessor:
                 window_type=self.window_type,
                 window_param=self.window_param,
                 dc_block=self.dc_block,
+                power_scale=self.power_scale,
                 averaging_mode=self.averaging_mode,
                 averaging_param=self.averaging_param,
                 output_fps=self.output_fps,
@@ -278,6 +284,7 @@ class SpectrumStreamProcessor:
                 window_type=self.window_type,
                 window_param=self.window_param,
                 dc_block=self.dc_block,
+                power_scale=self.power_scale,
                 averaging_mode=self.averaging_mode,
                 averaging_param=self.averaging_param,
                 output_fps=self.output_fps,
@@ -301,6 +308,7 @@ class SpectrumStreamProcessor:
                 window_type=self.window_type,
                 window_param=self.window_param,
                 dc_block=self.dc_block,
+                power_scale=self.power_scale,
                 averaging_mode=self.averaging_mode,
                 averaging_param=self.averaging_param,
                 output_fps=self.output_fps,

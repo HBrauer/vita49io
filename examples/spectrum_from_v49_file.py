@@ -87,6 +87,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--output-bins", type=int, default=None)
     parser.add_argument("--band-mode", choices=["inband", "full"], default="full")
     parser.add_argument("--dc-block", action="store_true", help="Subtract mean from each FFT segment.")
+    parser.add_argument("--power-scale", choices=["dbfs", "raw"], default="dbfs")
     return parser.parse_args(argv)
 
 
@@ -110,6 +111,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             window_type=args.window,
             window_param=args.window_param,
             dc_block=bool(args.dc_block),
+            power_scale=args.power_scale,
             averaging_mode=args.averaging,
             averaging_param=int(args.averaging_param)
             if args.averaging == "mean"
