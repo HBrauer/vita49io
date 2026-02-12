@@ -1,0 +1,71 @@
+# Decimator configuration for examples/ddc_v49_file.py
+#
+# Each [[decimator.paths]] entry defines one supported conversion path:
+# - input_sample_rate: input stream sample rate (Hz)
+# - output_sample_rate: requested output sample rate (Hz)
+# - bandwidth: output bandwidth used in output context packets (Hz)
+# - taps: FIR coefficients used by scipy.signal.resample_poly
+#
+# Notes:
+# - Replace taps below with your real designed coefficients.
+# - For identity paths (input_sample_rate == output_sample_rate), taps can be omitted.
+
+[[decimator.paths]]
+input_sample_rate = 98304000
+output_sample_rate = 1536000
+bandwidth = 10000
+taps = [
+  0.0001,
+  0.0002,
+  0.0003,
+  0.0002,
+  0.0001,
+]
+
+[[decimator.paths]]
+input_sample_rate = 1536000
+output_sample_rate = 128000
+bandwidth = 10000
+taps = [
+  -0.001,
+  0.0,
+  0.01,
+  0.0,
+  -0.001,
+]
+
+[[decimator.paths]]
+input_sample_rate = 1536000
+output_sample_rate = 16000
+bandwidth = 10000
+taps = [
+  -0.001,
+  0.0,
+  0.01,
+  0.0,
+  -0.001,
+]
+
+[[decimator.paths]]
+input_sample_rate = 1536000
+output_sample_rate = 192000
+bandwidth = 10000
+taps = [
+  -0.001,
+  0.0,
+  0.01,
+  0.0,
+  -0.001,
+]
+
+[[decimator.paths]]
+input_sample_rate = 192000
+output_sample_rate = 16000
+bandwidth = 10000
+taps = [
+  -0.001,
+  0.0,
+  0.01,
+  0.0,
+  -0.001,
+]
