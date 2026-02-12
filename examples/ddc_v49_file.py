@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
-from scipy.signal import resample_poly
+from scipy.signal import upfirdn
 
 from vita49io.defaults.default_payload_formats import DefaultPayloadFormats
 from vita49io.io.iq_writer import IQStreamWriter
@@ -24,6 +24,89 @@ DEFAULT_DECIMATOR_CONFIG_PATH = Path(__file__).with_name("ddc_v49_file.toml")
 class DecimatorPath:
     bandwidth_hz: int
     taps: Optional[np.ndarray]
+
+
+class StreamingResampler:
+    def __init__(self, h: np.ndarray, up: int, down: int):
+        if up <= 0 or down <= 0:
+            raise ValueError("up and down must be positive integers")
+
+        self.h = np.asarray(h, dtype=np.float32)
+        if self.h.ndim != 1 or self.h.size == 0:
+            raise ValueError("h must be a non-empty 1-D array")
+
+        self.up = int(up)
+        self.down = int(down)
+        self._delay_len = int(self.h.size - 1)
+        self.delay = np.zeros(self._delay_len, dtype=np.complex64)
+        self._carry = np.empty(0, dtype=np.complex64)
+        self._discard = (self._delay_len * self.up) // self.down
+        self._inv_up_mod_down = (
+            pow(self.up % self.down, -1, self.down) if self.down > 1 else None
+        )
+
+    def _aligned_prefix_len(self, total_len: int) -> int:
+        if total_len <= 0 or self.down == 1:
+            return max(total_len, 0)
+        rem = (total_len * self.up) % self.down
+        if rem == 0:
+            return total_len
+        subtract = (rem * self._inv_up_mod_down) % self.down
+        if subtract == 0 or subtract > total_len:
+            return 0
+        return total_len - subtract
+
+    def _filter_block(self, block: np.ndarray) -> np.ndarray:
+        if block.size == 0:
+            return np.empty(0, dtype=np.complex64)
+        if self._delay_len:
+            x = np.concatenate([self.delay, block])
+        else:
+            x = block
+        y = upfirdn(self.h, x, up=self.up, down=self.down)
+        if self._discard:
+            y = y[self._discard :]
+        if self._delay_len:
+            self.delay = x[-self._delay_len :]
+        return np.asarray(y, dtype=np.complex64)
+
+    def process(self, packet: np.ndarray) -> np.ndarray:
+        packet = np.asarray(packet, dtype=np.complex64).reshape(-1)
+        if packet.size == 0:
+            return np.empty(0, dtype=np.complex64)
+
+        if self._carry.size:
+            data = np.concatenate([self._carry, packet])
+        else:
+            data = packet
+
+        n_proc = self._aligned_prefix_len(int(data.size))
+        if n_proc == 0:
+            self._carry = data
+            return np.empty(0, dtype=np.complex64)
+
+        block = data[:n_proc]
+        self._carry = data[n_proc:]
+        return self._filter_block(block)
+
+    def flush(self) -> np.ndarray:
+        if self._delay_len == 0 and self._carry.size == 0:
+            return np.empty(0, dtype=np.complex64)
+
+        if self._delay_len:
+            x = np.concatenate(
+                [self.delay, self._carry, np.zeros(self._delay_len, dtype=np.complex64)]
+            )
+        else:
+            x = self._carry
+
+        self._carry = np.empty(0, dtype=np.complex64)
+        y = upfirdn(self.h, x, up=self.up, down=self.down)
+        if self._discard:
+            y = y[self._discard :]
+        if self._delay_len:
+            self.delay = np.zeros(self._delay_len, dtype=np.complex64)
+        return np.asarray(y, dtype=np.complex64)
 
 
 def _ensure_src_on_path() -> None:
@@ -165,7 +248,7 @@ def _load_decimator_paths(config_path: Path) -> Dict[Tuple[int, int], DecimatorP
                 raise ValueError(
                     f"'taps' must be an array in [[decimator.paths]] entry #{idx}"
                 )
-            taps = np.asarray(taps_raw, dtype=np.float64)
+            taps = np.asarray(taps_raw, dtype=np.float32)
             if taps.ndim != 1:
                 raise ValueError(
                     f"'taps' must be a 1-D array in [[decimator.paths]] entry #{idx}"
@@ -282,7 +365,7 @@ def convert_v49_ddc(
     decimator_path: Optional[DecimatorPath] = None
     up: Optional[int] = None
     down: Optional[int] = None
-    resample_window = None
+    streaming_resampler: Optional[StreamingResampler] = None
 
     # Output stream state
     writer: Optional[IQStreamWriter] = None
@@ -380,7 +463,14 @@ def convert_v49_ddc(
                             f"Decimator path {input_sample_rate_hz} -> {output_sample_rate_hz} "
                             "is missing 'taps' in config"
                         )
-                    resample_window = decimator_path.taps
+                    if up == 1 and down == 1:
+                        streaming_resampler = None
+                    else:
+                        streaming_resampler = StreamingResampler(
+                            decimator_path.taps,
+                            up,
+                            down,
+                        )
 
                 if writer is None:
                     if input_stream_id is None:
@@ -432,7 +522,7 @@ def convert_v49_ddc(
                     if up == 1 and down == 1:
                         resampled = block
                     else:
-                        resampled = resample_poly(block, up, down, window=resample_window)
+                        resampled = streaming_resampler.process(block)
                     emit_samples(np.asarray(resampled, dtype=np.complex64).reshape(-1), f_out)
                 continue
 
@@ -454,12 +544,24 @@ def convert_v49_ddc(
                         f"Decimator path {input_sample_rate_hz} -> {output_sample_rate_hz} "
                         "is missing 'taps' in config"
                     )
-                resample_window = decimator_path.taps
+                if up == 1 and down == 1:
+                    streaming_resampler = None
+                else:
+                    streaming_resampler = StreamingResampler(
+                        decimator_path.taps,
+                        up,
+                        down,
+                    )
             if up == 1 and down == 1:
                 resampled = combined
             else:
-                resampled = resample_poly(combined, up, down, window=resample_window)
+                resampled = streaming_resampler.process(combined)
             emit_samples(np.asarray(resampled, dtype=np.complex64).reshape(-1), f_out)
+
+        # Flush filter/carry state for streaming resampler at EOF
+        if streaming_resampler is not None:
+            tail = streaming_resampler.flush()
+            emit_samples(np.asarray(tail, dtype=np.complex64).reshape(-1), f_out)
 
         # Pad the last packet with zeros to reach samples_per_packet
         if writer is not None and out_buffer.size > 0:
