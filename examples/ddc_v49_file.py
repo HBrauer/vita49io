@@ -21,9 +21,25 @@ DEFAULT_DECIMATOR_CONFIG_PATH = Path(__file__).with_name("ddc_v49_file.toml")
 
 
 @dataclass(frozen=True)
+class DecimatorStageConfig:
+    input_sample_rate_hz: int
+    output_sample_rate_hz: int
+    taps: Optional[np.ndarray]
+
+
+@dataclass(frozen=True)
 class DecimatorPath:
     bandwidth_hz: int
-    taps: Optional[np.ndarray]
+    stages: Tuple[DecimatorStageConfig, ...]
+
+
+@dataclass
+class RuntimeDecimatorStage:
+    input_sample_rate_hz: int
+    output_sample_rate_hz: int
+    up: int
+    down: int
+    resampler: Optional["StreamingResampler"]
 
 
 class StreamingResampler:
@@ -192,6 +208,46 @@ def _resample_ratio(in_rate_hz: int, out_rate_hz: int) -> Tuple[int, int]:
     return frac.numerator, frac.denominator
 
 
+def _parse_taps(taps_raw, label: str) -> Optional[np.ndarray]:
+    if taps_raw is None:
+        return None
+    if not isinstance(taps_raw, list):
+        raise ValueError(f"'taps' must be an array in {label}")
+    taps = np.asarray(taps_raw, dtype=np.float32)
+    if taps.ndim != 1 or taps.size == 0:
+        raise ValueError(f"'taps' must be a non-empty 1-D array in {label}")
+    return taps
+
+
+def _parse_decimator_stage(
+    stage_entry: dict,
+    *,
+    label: str,
+) -> DecimatorStageConfig:
+    try:
+        in_rate = int(stage_entry["input_sample_rate"])
+        out_rate = int(stage_entry["output_sample_rate"])
+    except KeyError as exc:
+        raise ValueError(f"Missing required key {exc} in {label}") from exc
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid numeric sample rate in {label}") from exc
+
+    if in_rate <= 0 or out_rate <= 0:
+        raise ValueError(f"Sample rates must be > 0 in {label}")
+
+    taps = _parse_taps(stage_entry.get("taps"), label)
+    if in_rate != out_rate and taps is None:
+        raise ValueError(
+            f"Non-identity stage requires 'taps' in {label}: {in_rate} -> {out_rate}"
+        )
+
+    return DecimatorStageConfig(
+        input_sample_rate_hz=in_rate,
+        output_sample_rate_hz=out_rate,
+        taps=taps,
+    )
+
+
 def _load_decimator_paths(config_path: Path) -> Dict[Tuple[int, int], DecimatorPath]:
     config_path = config_path.expanduser()
     if not config_path.is_file():
@@ -239,20 +295,60 @@ def _load_decimator_paths(config_path: Path) -> Dict[Tuple[int, int], DecimatorP
                 f"Invalid numeric value in [[decimator.paths]] entry #{idx}"
             ) from exc
 
-        taps_raw = entry.get("taps")
-        taps: Optional[np.ndarray]
-        if taps_raw is None:
-            taps = None
+        if in_rate <= 0 or out_rate <= 0 or bandwidth_hz <= 0:
+            raise ValueError(
+                f"input_sample_rate, output_sample_rate, and bandwidth must be > 0 "
+                f"in [[decimator.paths]] entry #{idx}"
+            )
+
+        raw_stages = entry.get("stages")
+        path_label = f"[[decimator.paths]] entry #{idx}"
+        if raw_stages is None:
+            stage_entry = {
+                "input_sample_rate": in_rate,
+                "output_sample_rate": out_rate,
+                "taps": entry.get("taps"),
+            }
+            stages = [_parse_decimator_stage(stage_entry, label=f"{path_label} stage #1")]
         else:
-            if not isinstance(taps_raw, list):
+            if "taps" in entry:
                 raise ValueError(
-                    f"'taps' must be an array in [[decimator.paths]] entry #{idx}"
+                    f"'taps' and 'stages' cannot both be set in {path_label}"
                 )
-            taps = np.asarray(taps_raw, dtype=np.float32)
-            if taps.ndim != 1:
+            if not isinstance(raw_stages, list) or not raw_stages:
                 raise ValueError(
-                    f"'taps' must be a 1-D array in [[decimator.paths]] entry #{idx}"
+                    f"'stages' must be a non-empty array in {path_label}"
                 )
+            stages = []
+            for stage_idx, raw_stage in enumerate(raw_stages, start=1):
+                if not isinstance(raw_stage, dict):
+                    raise ValueError(
+                        f"Stage #{stage_idx} must be a table in {path_label}"
+                    )
+                stages.append(
+                    _parse_decimator_stage(
+                        raw_stage,
+                        label=f"{path_label} stage #{stage_idx}",
+                    )
+                )
+
+            if stages[0].input_sample_rate_hz != in_rate:
+                raise ValueError(
+                    f"First stage input sample rate must match path input in {path_label}"
+                )
+            if stages[-1].output_sample_rate_hz != out_rate:
+                raise ValueError(
+                    f"Last stage output sample rate must match path output in {path_label}"
+                )
+            for stage_idx in range(len(stages) - 1):
+                if (
+                    stages[stage_idx].output_sample_rate_hz
+                    != stages[stage_idx + 1].input_sample_rate_hz
+                ):
+                    raise ValueError(
+                        f"Stage sample rates must chain continuously in {path_label}: "
+                        f"stage #{stage_idx + 1} output does not match stage #{stage_idx + 2} input"
+                    )
 
         key = (in_rate, out_rate)
         if key in paths:
@@ -262,7 +358,7 @@ def _load_decimator_paths(config_path: Path) -> Dict[Tuple[int, int], DecimatorP
 
         paths[key] = DecimatorPath(
             bandwidth_hz=bandwidth_hz,
-            taps=taps,
+            stages=tuple(stages),
         )
 
     return paths
@@ -296,6 +392,79 @@ def _get_decimator_path(
         f"{output_sample_rate_hz}. Configured inputs for this output: "
         + ", ".join(str(x) for x in supported_input_rates)
     )
+
+
+def _build_runtime_stage_chain(decimator_path: DecimatorPath) -> list[RuntimeDecimatorStage]:
+    runtime_stages: list[RuntimeDecimatorStage] = []
+    for idx, stage_cfg in enumerate(decimator_path.stages, start=1):
+        up, down = _resample_ratio(
+            stage_cfg.input_sample_rate_hz,
+            stage_cfg.output_sample_rate_hz,
+        )
+        if (up != 1 or down != 1) and stage_cfg.taps is None:
+            raise ValueError(
+                f"Stage #{idx} is missing 'taps' for "
+                f"{stage_cfg.input_sample_rate_hz} -> {stage_cfg.output_sample_rate_hz}"
+            )
+
+        runtime_stages.append(
+            RuntimeDecimatorStage(
+                input_sample_rate_hz=stage_cfg.input_sample_rate_hz,
+                output_sample_rate_hz=stage_cfg.output_sample_rate_hz,
+                up=up,
+                down=down,
+                resampler=(
+                    None
+                    if up == 1 and down == 1
+                    else StreamingResampler(stage_cfg.taps, up, down)
+                ),
+            )
+        )
+
+    return runtime_stages
+
+
+def _process_through_stages(
+    runtime_stage_chain: list[RuntimeDecimatorStage],
+    samples: np.ndarray,
+) -> np.ndarray:
+    y = np.asarray(samples, dtype=np.complex64).reshape(-1)
+    for runtime_stage in runtime_stage_chain:
+        if y.size == 0:
+            break
+        if runtime_stage.resampler is None:
+            continue
+        y = runtime_stage.resampler.process(y)
+    return np.asarray(y, dtype=np.complex64).reshape(-1)
+
+
+def _flush_stage_chain(runtime_stage_chain: list[RuntimeDecimatorStage]) -> np.ndarray:
+    if not runtime_stage_chain:
+        return np.empty(0, dtype=np.complex64)
+
+    flushed_chunks: list[np.ndarray] = []
+    for stage_idx, runtime_stage in enumerate(runtime_stage_chain):
+        if runtime_stage.resampler is None:
+            continue
+
+        stage_tail = runtime_stage.resampler.flush()
+        if stage_tail.size == 0:
+            continue
+
+        if stage_idx + 1 < len(runtime_stage_chain):
+            stage_tail = _process_through_stages(
+                runtime_stage_chain[stage_idx + 1 :],
+                stage_tail,
+            )
+
+        if stage_tail.size > 0:
+            flushed_chunks.append(np.asarray(stage_tail, dtype=np.complex64).reshape(-1))
+
+    if not flushed_chunks:
+        return np.empty(0, dtype=np.complex64)
+    if len(flushed_chunks) == 1:
+        return flushed_chunks[0]
+    return np.concatenate(flushed_chunks)
 
 
 def convert_v49_ddc(
@@ -363,9 +532,7 @@ def convert_v49_ddc(
 
     # Resampling parameters
     decimator_path: Optional[DecimatorPath] = None
-    up: Optional[int] = None
-    down: Optional[int] = None
-    streaming_resampler: Optional[StreamingResampler] = None
+    runtime_stage_chain: Optional[list[RuntimeDecimatorStage]] = None
 
     # Output stream state
     writer: Optional[IQStreamWriter] = None
@@ -450,27 +617,14 @@ def convert_v49_ddc(
                         "Supported: F32_IQ, S32_IQ, S24_IQ, S16_IQ"
                     )
 
-                if up is None or down is None:
+                if runtime_stage_chain is None:
                     decimator_path = _get_decimator_path(
                         decimator_paths,
                         input_sample_rate_hz,
                         output_sample_rate_hz,
                     )
                     output_bandwidth_hz = decimator_path.bandwidth_hz
-                    up, down = _resample_ratio(input_sample_rate_hz, output_sample_rate_hz)
-                    if (up != 1 or down != 1) and decimator_path.taps is None:
-                        raise ValueError(
-                            f"Decimator path {input_sample_rate_hz} -> {output_sample_rate_hz} "
-                            "is missing 'taps' in config"
-                        )
-                    if up == 1 and down == 1:
-                        streaming_resampler = None
-                    else:
-                        streaming_resampler = StreamingResampler(
-                            decimator_path.taps,
-                            up,
-                            down,
-                        )
+                    runtime_stage_chain = _build_runtime_stage_chain(decimator_path)
 
                 if writer is None:
                     if input_stream_id is None:
@@ -519,10 +673,7 @@ def convert_v49_ddc(
                     in_chunks = [remainder] if remainder.size else []
                     in_count = int(remainder.size)
 
-                    if up == 1 and down == 1:
-                        resampled = block
-                    else:
-                        resampled = streaming_resampler.process(block)
+                    resampled = _process_through_stages(runtime_stage_chain, block)
                     emit_samples(np.asarray(resampled, dtype=np.complex64).reshape(-1), f_out)
                 continue
 
@@ -531,36 +682,20 @@ def convert_v49_ddc(
         # Process remaining samples after loop ends
         if in_count > 0 and input_sample_rate_hz is not None and input_payload_format is not None:
             combined = np.concatenate(in_chunks) if len(in_chunks) > 1 else in_chunks[0]
-            if up is None or down is None:
+            if runtime_stage_chain is None:
                 decimator_path = _get_decimator_path(
                     decimator_paths,
                     input_sample_rate_hz,
                     output_sample_rate_hz,
                 )
                 output_bandwidth_hz = decimator_path.bandwidth_hz
-                up, down = _resample_ratio(input_sample_rate_hz, output_sample_rate_hz)
-                if (up != 1 or down != 1) and decimator_path.taps is None:
-                    raise ValueError(
-                        f"Decimator path {input_sample_rate_hz} -> {output_sample_rate_hz} "
-                        "is missing 'taps' in config"
-                    )
-                if up == 1 and down == 1:
-                    streaming_resampler = None
-                else:
-                    streaming_resampler = StreamingResampler(
-                        decimator_path.taps,
-                        up,
-                        down,
-                    )
-            if up == 1 and down == 1:
-                resampled = combined
-            else:
-                resampled = streaming_resampler.process(combined)
+                runtime_stage_chain = _build_runtime_stage_chain(decimator_path)
+            resampled = _process_through_stages(runtime_stage_chain, combined)
             emit_samples(np.asarray(resampled, dtype=np.complex64).reshape(-1), f_out)
 
-        # Flush filter/carry state for streaming resampler at EOF
-        if streaming_resampler is not None:
-            tail = streaming_resampler.flush()
+        # Flush filter/carry state for all resampler stages at EOF
+        if runtime_stage_chain is not None:
+            tail = _flush_stage_chain(runtime_stage_chain)
             emit_samples(np.asarray(tail, dtype=np.complex64).reshape(-1), f_out)
 
         # Pad the last packet with zeros to reach samples_per_packet

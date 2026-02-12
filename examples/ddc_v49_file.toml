@@ -1,31 +1,72 @@
 # Decimator configuration for examples/ddc_v49_file.py
 #
-# Each [[decimator.paths]] entry defines one supported conversion path:
+# Each [[decimator.paths]] entry defines one supported conversion path.
+# Each path may use one or more [[decimator.paths.stages]] for multi-stage
+# decimation/resampling.
+#
+# Path-level fields:
 # - input_sample_rate: input stream sample rate (Hz)
 # - output_sample_rate: requested output sample rate (Hz)
 # - bandwidth: output bandwidth used in output context packets (Hz)
-# - taps: FIR coefficients used by scipy.signal.resample_poly
+#
+# Stage-level fields:
+# - input_sample_rate: stage input sample rate (Hz)
+# - output_sample_rate: stage output sample rate (Hz)
+# - taps: FIR coefficients for this stage (float32-friendly values)
 #
 # Notes:
 # - Replace taps below with your real designed coefficients.
-# - For identity paths (input_sample_rate == output_sample_rate), taps can be omitted.
-
-[[decimator.paths]]
-input_sample_rate = 98304000
-output_sample_rate = 1536000
-bandwidth = 10000
-taps = [
-  0.0001,
-  0.0002,
-  0.0003,
-  0.0002,
-  0.0001,
-]
+# - Stages must chain continuously:
+#   stage[n].output_sample_rate == stage[n+1].input_sample_rate
+# - First stage input and last stage output must match the path-level rates.
+# - Identity stages (same in/out rate) may omit taps.
 
 [[decimator.paths]]
 input_sample_rate = 1536000
 output_sample_rate = 128000
 bandwidth = 10000
+
+[[decimator.paths.stages]]
+input_sample_rate = 1536000
+output_sample_rate = 128000
+taps = [
+  -0.001,
+  0.0,
+  0.01,
+  0.0,
+  -0.001,
+]
+
+[[decimator.paths]]
+input_sample_rate = 98304000
+output_sample_rate = 6144
+bandwidth = 10000
+
+[[decimator.paths.stages]]
+input_sample_rate = 98304000
+output_sample_rate = 1536000
+taps = [
+  -0.001,
+  0.0,
+  0.01,
+  0.0,
+  -0.001,
+]
+
+[[decimator.paths.stages]]
+input_sample_rate = 1536000
+output_sample_rate = 61440
+taps = [
+  -0.001,
+  0.0,
+  0.01,
+  0.0,
+  -0.001,
+]
+
+[[decimator.paths.stages]]
+input_sample_rate = 61440
+output_sample_rate = 6144
 taps = [
   -0.001,
   0.0,
@@ -38,18 +79,10 @@ taps = [
 input_sample_rate = 1536000
 output_sample_rate = 16000
 bandwidth = 10000
-taps = [
-  -0.001,
-  0.0,
-  0.01,
-  0.0,
-  -0.001,
-]
 
-[[decimator.paths]]
+[[decimator.paths.stages]]
 input_sample_rate = 1536000
-output_sample_rate = 192000
-bandwidth = 10000
+output_sample_rate = 128000
 taps = [
   -0.001,
   0.0,
@@ -58,10 +91,9 @@ taps = [
   -0.001,
 ]
 
-[[decimator.paths]]
-input_sample_rate = 192000
+[[decimator.paths.stages]]
+input_sample_rate = 128000
 output_sample_rate = 16000
-bandwidth = 10000
 taps = [
   -0.001,
   0.0,
