@@ -125,6 +125,29 @@ class StreamingResampler:
         return np.asarray(y, dtype=np.complex64)
 
 
+class StreamingFrequencyShifter:
+    def __init__(self, sample_rate_hz: float, frequency_offset_hz: float):
+        if sample_rate_hz <= 0:
+            raise ValueError("sample_rate_hz must be > 0")
+        self.sample_rate_hz = float(sample_rate_hz)
+        self.frequency_offset_hz = float(frequency_offset_hz)
+        self._phase = 0.0
+        self._phase_step = -2.0 * np.pi * self.frequency_offset_hz / self.sample_rate_hz
+
+    def process(self, samples: np.ndarray) -> np.ndarray:
+        x = np.asarray(samples, dtype=np.complex64).reshape(-1)
+        if x.size == 0 or self.frequency_offset_hz == 0.0:
+            return x
+
+        n = np.arange(x.size, dtype=np.float64)
+        osc = np.exp(1j * (self._phase + self._phase_step * n))
+        y = x * osc
+
+        self._phase += self._phase_step * x.size
+        self._phase = float(np.fmod(self._phase, 2.0 * np.pi))
+        return np.asarray(y, dtype=np.complex64)
+
+
 def _ensure_src_on_path() -> None:
     # Allow running the example from the repo root without installation
     here = Path(__file__).resolve().parent
@@ -164,6 +187,26 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         required=True,
         type=int,
         help="Output sample rate in Hz",
+    )
+    tuning_group = parser.add_mutually_exclusive_group()
+    tuning_group.add_argument(
+        "--center-frequency-hz",
+        type=float,
+        default=None,
+        help=(
+            "Target RF center frequency in Hz (absolute). "
+            "If input CIF0 rf_reference_frequency_hz is available, this is interpreted "
+            "as absolute RF and converted to an offset from the input center."
+        ),
+    )
+    tuning_group.add_argument(
+        "--center-frequency-offset-hz",
+        type=float,
+        default=None,
+        help=(
+            "Target center frequency offset in Hz relative to input "
+            "CIF0 rf_reference_frequency_hz."
+        ),
     )
     parser.add_argument(
         "--config",
@@ -467,6 +510,66 @@ def _flush_stage_chain(runtime_stage_chain: list[RuntimeDecimatorStage]) -> np.n
     return np.concatenate(flushed_chunks)
 
 
+def _resolve_center_frequency(
+    center_frequency_hz: Optional[float],
+    center_frequency_offset_hz: Optional[float],
+    input_rf_reference_frequency_hz: Optional[float],
+) -> Tuple[float, Optional[float]]:
+    if center_frequency_hz is not None and center_frequency_offset_hz is not None:
+        raise ValueError(
+            "Specify either center_frequency_hz or center_frequency_offset_hz, not both"
+        )
+
+    if center_frequency_offset_hz is not None:
+        if input_rf_reference_frequency_hz is None:
+            raise ValueError(
+                "center_frequency_offset_hz requires input CIF0 rf_reference_frequency_hz"
+            )
+        offset_hz = float(center_frequency_offset_hz)
+        return offset_hz, float(input_rf_reference_frequency_hz + offset_hz)
+
+    if center_frequency_hz is None:
+        return 0.0, input_rf_reference_frequency_hz
+
+    target_center_hz = float(center_frequency_hz)
+    if input_rf_reference_frequency_hz is None:
+        # Fall back to DC-referenced interpretation when RF reference is unavailable.
+        return target_center_hz, target_center_hz
+
+    return (
+        float(target_center_hz - input_rf_reference_frequency_hz),
+        target_center_hz,
+    )
+
+
+def _validate_output_band_within_input(
+    input_bandwidth_hz: Optional[float],
+    output_bandwidth_hz: float,
+    center_frequency_offset_hz: float,
+) -> None:
+    if input_bandwidth_hz is None:
+        raise ValueError(
+            "Input CIF0 bandwidth_hz is missing; cannot verify requested center frequency"
+        )
+
+    in_bw = float(input_bandwidth_hz)
+    out_bw = float(output_bandwidth_hz)
+    if in_bw <= 0 or out_bw <= 0:
+        raise ValueError("Input and output bandwidth must be > 0")
+    if out_bw > in_bw:
+        raise ValueError(
+            f"Output bandwidth {out_bw} Hz exceeds input CIF0 bandwidth {in_bw} Hz"
+        )
+
+    max_offset = (in_bw - out_bw) / 2.0
+    if abs(float(center_frequency_offset_hz)) > max_offset:
+        raise ValueError(
+            "Requested center frequency is outside input bandwidth: "
+            f"|offset|={abs(center_frequency_offset_hz)} Hz, "
+            f"max allowed={max_offset} Hz, input_bw={in_bw} Hz, output_bw={out_bw} Hz"
+        )
+
+
 def convert_v49_ddc(
     input_path: Path,
     output_path: Path,
@@ -475,6 +578,8 @@ def convert_v49_ddc(
     chunk_samples: int,
     samples_per_packet: int,
     config_path: Optional[Path] = None,
+    center_frequency_hz: Optional[float] = None,
+    center_frequency_offset_hz: Optional[float] = None,
 ) -> Dict[str, int]:
     _ensure_src_on_path()
 
@@ -518,6 +623,7 @@ def convert_v49_ddc(
     input_sample_rate_hz: Optional[int] = None
     input_payload_format = None
     input_payload_name: Optional[str] = None
+    input_bandwidth_hz: Optional[float] = None
     input_rf_ref_hz: Optional[float] = None
     input_rf_ref_offset_hz: Optional[float] = None
     input_if_ref_hz: Optional[float] = None
@@ -533,6 +639,9 @@ def convert_v49_ddc(
     # Resampling parameters
     decimator_path: Optional[DecimatorPath] = None
     runtime_stage_chain: Optional[list[RuntimeDecimatorStage]] = None
+    frequency_shifter: Optional[StreamingFrequencyShifter] = None
+    center_frequency_offset_effective_hz: float = 0.0
+    output_rf_reference_frequency_hz: Optional[float] = None
 
     # Output stream state
     writer: Optional[IQStreamWriter] = None
@@ -585,6 +694,8 @@ def convert_v49_ddc(
                         )
                     if input_sample_rate_hz is None and cif0.sample_rate_hz is not None:
                         input_sample_rate_hz = int(round(float(cif0.sample_rate_hz)))
+                    if input_bandwidth_hz is None and cif0.bandwidth_hz is not None:
+                        input_bandwidth_hz = float(cif0.bandwidth_hz)
                     if input_rf_ref_hz is None and cif0.rf_reference_frequency_hz is not None:
                         input_rf_ref_hz = float(cif0.rf_reference_frequency_hz)
                     if input_rf_ref_offset_hz is None and cif0.rf_reference_frequency_offset_hz is not None:
@@ -624,7 +735,25 @@ def convert_v49_ddc(
                         output_sample_rate_hz,
                     )
                     output_bandwidth_hz = decimator_path.bandwidth_hz
+                    (
+                        center_frequency_offset_effective_hz,
+                        output_rf_reference_frequency_hz,
+                    ) = _resolve_center_frequency(
+                        center_frequency_hz=center_frequency_hz,
+                        center_frequency_offset_hz=center_frequency_offset_hz,
+                        input_rf_reference_frequency_hz=input_rf_ref_hz,
+                    )
+                    _validate_output_band_within_input(
+                        input_bandwidth_hz=input_bandwidth_hz,
+                        output_bandwidth_hz=float(output_bandwidth_hz),
+                        center_frequency_offset_hz=center_frequency_offset_effective_hz,
+                    )
                     runtime_stage_chain = _build_runtime_stage_chain(decimator_path)
+                    if center_frequency_offset_effective_hz != 0.0:
+                        frequency_shifter = StreamingFrequencyShifter(
+                            sample_rate_hz=float(input_sample_rate_hz),
+                            frequency_offset_hz=center_frequency_offset_effective_hz,
+                        )
 
                 if writer is None:
                     if input_stream_id is None:
@@ -646,7 +775,7 @@ def convert_v49_ddc(
                         frequency_domain=bool(pkt.header.indicators_24),
                         start_time_epoch_s=start_time_s,
                         bandwidth_hz=float(output_bandwidth_hz),
-                        rf_reference_frequency_hz=input_rf_ref_hz,
+                        rf_reference_frequency_hz=output_rf_reference_frequency_hz,
                         rf_reference_frequency_offset_hz=input_rf_ref_offset_hz,
                         if_reference_frequency_hz=input_if_ref_hz,
                         if_band_offset_hz=input_if_band_offset_hz,
@@ -673,6 +802,8 @@ def convert_v49_ddc(
                     in_chunks = [remainder] if remainder.size else []
                     in_count = int(remainder.size)
 
+                    if frequency_shifter is not None:
+                        block = frequency_shifter.process(block)
                     resampled = _process_through_stages(runtime_stage_chain, block)
                     emit_samples(np.asarray(resampled, dtype=np.complex64).reshape(-1), f_out)
                 continue
@@ -689,7 +820,27 @@ def convert_v49_ddc(
                     output_sample_rate_hz,
                 )
                 output_bandwidth_hz = decimator_path.bandwidth_hz
+                (
+                    center_frequency_offset_effective_hz,
+                    output_rf_reference_frequency_hz,
+                ) = _resolve_center_frequency(
+                    center_frequency_hz=center_frequency_hz,
+                    center_frequency_offset_hz=center_frequency_offset_hz,
+                    input_rf_reference_frequency_hz=input_rf_ref_hz,
+                )
+                _validate_output_band_within_input(
+                    input_bandwidth_hz=input_bandwidth_hz,
+                    output_bandwidth_hz=float(output_bandwidth_hz),
+                    center_frequency_offset_hz=center_frequency_offset_effective_hz,
+                )
                 runtime_stage_chain = _build_runtime_stage_chain(decimator_path)
+                if center_frequency_offset_effective_hz != 0.0:
+                    frequency_shifter = StreamingFrequencyShifter(
+                        sample_rate_hz=float(input_sample_rate_hz),
+                        frequency_offset_hz=center_frequency_offset_effective_hz,
+                    )
+            if frequency_shifter is not None:
+                combined = frequency_shifter.process(combined)
             resampled = _process_through_stages(runtime_stage_chain, combined)
             emit_samples(np.asarray(resampled, dtype=np.complex64).reshape(-1), f_out)
 
@@ -732,6 +883,16 @@ def main(argv: Optional[list[str]] = None) -> int:
             output_sample_rate_hz=int(args.output_sample_rate),
             chunk_samples=int(args.chunk_samples),
             samples_per_packet=int(args.samples_per_packet),
+            center_frequency_hz=(
+                float(args.center_frequency_hz)
+                if args.center_frequency_hz is not None
+                else None
+            ),
+            center_frequency_offset_hz=(
+                float(args.center_frequency_offset_hz)
+                if args.center_frequency_offset_hz is not None
+                else None
+            ),
             config_path=Path(args.config).expanduser() if args.config else None,
         )
     except FileNotFoundError as exc:
