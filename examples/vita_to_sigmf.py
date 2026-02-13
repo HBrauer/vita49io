@@ -57,17 +57,23 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 def _summarize_payload_format(pf: Optional["PayloadFormat"]) -> Optional[Dict[str, Any]]:
     if pf is None:
         return None
+    data_item_format = getattr(pf, "data_item_format", None)
     info: Dict[str, Any] = {
         "packing_method": pf.packing_method.name,
         "sample_type": pf.sample_type.name,
         "item_packing_field_size_bits": int(pf.item_packing_field_size_bits),
         "data_item_size_bits": int(pf.data_item_size_bits),
-        "data_item_format_code": int(pf.data_item_format_code),
         "repeat_count": int(pf.repeat_count),
         "vector_size": int(pf.vector_size),
     }
-    if pf.data_item_format is not None:
-        info["data_item_format"] = pf.data_item_format.name
+    if data_item_format is not None:
+        info["data_item_format_code"] = int(data_item_format)
+        info["data_item_format"] = data_item_format.name
+    else:
+        # Backward-compatible fallback for payload format objects that expose a raw code.
+        data_item_format_code = getattr(pf, "data_item_format_code", None)
+        if data_item_format_code is not None:
+            info["data_item_format_code"] = int(data_item_format_code)
     return info
 
 
