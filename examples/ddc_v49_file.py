@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
-from scipy.signal import upfirdn
+from scipy.signal import lfilter, upfirdn
+from scipy.signal._upfirdn import _output_len as _upfirdn_output_len
 
 from vita49io.defaults.default_payload_formats import DefaultPayloadFormats
 from vita49io.io.iq_writer import IQStreamWriter
@@ -53,76 +54,130 @@ class StreamingResampler:
 
         self.up = int(up)
         self.down = int(down)
-        self._delay_len = int(self.h.size - 1)
-        self.delay = np.zeros(self._delay_len, dtype=np.complex64)
-        self._carry = np.empty(0, dtype=np.complex64)
-        self._discard = (self._delay_len * self.up) // self.down
-        self._inv_up_mod_down = (
-            pow(self.up % self.down, -1, self.down) if self.down > 1 else None
+        self._h_len = int(self.h.size)
+        self._n_seen = 0
+
+        # Fast exact path for pure decimation.
+        if self.up == 1:
+            self._mode = "decimate"
+            self._zi = np.zeros(max(self._h_len - 1, 0), dtype=np.complex64)
+            self._phase = 0
+            return
+
+        # General exact rational path.
+        self._mode = "polyphase"
+        self._input = np.empty(0, dtype=np.complex64)
+        self._input_start = 0
+        self._m_emitted = 0
+        self._phase_coeffs = tuple(
+            np.asarray(self.h[p:: self.up][::-1], dtype=np.float32)
+            for p in range(self.up)
         )
+        self._max_phase_len = max((c.size for c in self._phase_coeffs), default=0)
 
-    def _aligned_prefix_len(self, total_len: int) -> int:
-        if total_len <= 0 or self.down == 1:
-            return max(total_len, 0)
-        rem = (total_len * self.up) % self.down
-        if rem == 0:
-            return total_len
-        subtract = (rem * self._inv_up_mod_down) % self.down
-        if subtract == 0 or subtract > total_len:
+    def _prefix_output_target(self, n_seen: int) -> int:
+        if n_seen <= 0:
             return 0
-        return total_len - subtract
+        causal_target = (n_seen * self.up + self.down - 1) // self.down
+        upfirdn_target = int(
+            _upfirdn_output_len(self._h_len, n_seen, self.up, self.down)
+        )
+        return min(causal_target, upfirdn_target)
 
-    def _filter_block(self, block: np.ndarray) -> np.ndarray:
-        if block.size == 0:
+    def _take_decimated(self, y: np.ndarray) -> np.ndarray:
+        if y.size == 0:
             return np.empty(0, dtype=np.complex64)
-        if self._delay_len:
-            x = np.concatenate([self.delay, block])
-        else:
-            x = block
-        y = upfirdn(self.h, x, up=self.up, down=self.down)
-        if self._discard:
-            y = y[self._discard :]
-        if self._delay_len:
-            self.delay = x[-self._delay_len :]
-        return np.asarray(y, dtype=np.complex64)
+        start = (-self._phase) % self.down
+        out = np.asarray(y[start:: self.down], dtype=np.complex64)
+        self._phase = (self._phase + int(y.size)) % self.down
+        return out
+
+    def _emit_polyphase_until(self, target_outputs: int) -> np.ndarray:
+        if target_outputs <= self._m_emitted:
+            return np.empty(0, dtype=np.complex64)
+
+        out = np.empty(target_outputs - self._m_emitted, dtype=np.complex64)
+        out_idx = 0
+
+        while self._m_emitted < target_outputs:
+            t = self._m_emitted * self.down
+            phase = t % self.up
+            coeff = self._phase_coeffs[phase]
+
+            if coeff.size == 0:
+                y = 0.0j
+            else:
+                n = t // self.up
+                start = int(n - coeff.size + 1)
+                avail_start = max(start, self._input_start, 0)
+                avail_end = min(
+                    int(n + 1),
+                    self._input_start + int(self._input.size),
+                )
+
+                if avail_end <= avail_start:
+                    y = 0.0j
+                else:
+                    coeff_offset = avail_start - start
+                    take = avail_end - avail_start
+                    c = coeff[coeff_offset : coeff_offset + take]
+                    x = self._input[
+                        avail_start - self._input_start : avail_end - self._input_start
+                    ]
+                    y = np.dot(c, x)
+
+            out[out_idx] = np.complex64(y)
+            out_idx += 1
+            self._m_emitted += 1
+
+            if self._max_phase_len > 0:
+                n_next = (self._m_emitted * self.down) // self.up
+                keep_from = max(0, int(n_next - (self._max_phase_len - 1)))
+                if keep_from > self._input_start:
+                    drop = min(keep_from - self._input_start, int(self._input.size))
+                    if drop > 0:
+                        self._input = self._input[drop:]
+                        self._input_start += drop
+
+        return out
 
     def process(self, packet: np.ndarray) -> np.ndarray:
         packet = np.asarray(packet, dtype=np.complex64).reshape(-1)
         if packet.size == 0:
             return np.empty(0, dtype=np.complex64)
 
-        if self._carry.size:
-            data = np.concatenate([self._carry, packet])
-        else:
-            data = packet
+        self._n_seen += int(packet.size)
 
-        n_proc = self._aligned_prefix_len(int(data.size))
-        if n_proc == 0:
-            self._carry = data
-            return np.empty(0, dtype=np.complex64)
+        if self._mode == "decimate":
+            if self._zi.size:
+                y, self._zi = lfilter(self.h, [1.0], packet, zi=self._zi)
+            else:
+                y = lfilter(self.h, [1.0], packet)
+            return self._take_decimated(np.asarray(y, dtype=np.complex64))
 
-        block = data[:n_proc]
-        self._carry = data[n_proc:]
-        return self._filter_block(block)
+        self._input = np.concatenate([self._input, packet])
+        target_outputs = self._prefix_output_target(self._n_seen)
+        return self._emit_polyphase_until(target_outputs)
 
     def flush(self) -> np.ndarray:
-        if self._delay_len == 0 and self._carry.size == 0:
+        if self._n_seen == 0:
             return np.empty(0, dtype=np.complex64)
 
-        if self._delay_len:
-            x = np.concatenate(
-                [self.delay, self._carry, np.zeros(self._delay_len, dtype=np.complex64)]
-            )
-        else:
-            x = self._carry
+        if self._mode == "decimate":
+            if self._h_len <= 1:
+                return np.empty(0, dtype=np.complex64)
+            z = np.zeros(self._h_len - 1, dtype=np.complex64)
+            if self._zi.size:
+                y, self._zi = lfilter(self.h, [1.0], z, zi=self._zi)
+                self._zi = np.zeros_like(self._zi)
+            else:
+                y = np.empty(0, dtype=np.complex64)
+            return self._take_decimated(np.asarray(y, dtype=np.complex64))
 
-        self._carry = np.empty(0, dtype=np.complex64)
-        y = upfirdn(self.h, x, up=self.up, down=self.down)
-        if self._discard:
-            y = y[self._discard :]
-        if self._delay_len:
-            self.delay = np.zeros(self._delay_len, dtype=np.complex64)
-        return np.asarray(y, dtype=np.complex64)
+        total_outputs = int(
+            _upfirdn_output_len(self._h_len, self._n_seen, self.up, self.down)
+        )
+        return self._emit_polyphase_until(total_outputs)
 
 
 class StreamingFrequencyShifter:
