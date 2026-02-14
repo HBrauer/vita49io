@@ -27,32 +27,12 @@ from ..protocol.cif0 import (
     DataItemFormat,
 )
 from .payload_codec import payload_from_numpy
+from .time_utils import epoch_time_to_vita_timestamp
 
 
 def _now_epoch_s() -> float:
     # Use UTC-aware datetime for portability/clarity
     return datetime.now(timezone.utc).timestamp()
-
-
-def _to_vrt_time(t_epoch_s: float) -> Tuple[int, int]:
-    """Convert POSIX epoch seconds to (integer_seconds, fractional_seconds_64bit).
-
-    - integer_seconds: floor of seconds since epoch (UTC)
-    - fractional_seconds: 64-bit fractional part of the second (0 .. 2^64-1)
-    """
-    if t_epoch_s < 0:
-        # Still handle negative times reasonably by flooring
-        sec = int(np.floor(t_epoch_s))
-    else:
-        sec = int(t_epoch_s)
-    frac = t_epoch_s - float(sec)
-    # Multiply by 2^64; round to nearest integer
-    fs = int(np.floor(frac * (1 << 64) + 0.5))
-    if fs >= (1 << 64):
-        # Carry into integer seconds if rounding pushed us over
-        fs = 0
-        sec += 1
-    return sec, fs
 
 
 @dataclass
@@ -76,6 +56,11 @@ class IQStreamWriter:
         requires_vita49_2 (bool): Flag to set V49.2 indicator bit.
         frequency_domain (bool): Set the spectrum (S) bit for frequency-domain data.
         start_time_epoch_s (float | None): Initial epoch time for packet timestamps.
+        gps_utc_offset_s (int | None): GPS-UTC leap second offset for `TSI.GPS`.
+        other_epoch_s (float | None): Epoch origin used for `TSI.OTHER` conversion.
+        tsi_none_reference_s (float | None): Reference epoch used when `TSI.NONE` still carries TSF.
+        sample_count_rate_hz (float | None): Optional tick rate override for `TSF.SAMPLE_COUNT`.
+        free_running_rate_hz (float | None): Optional tick rate override for `TSF.FREE_RUNNING`.
         bandwidth_hz (float | None): Optional CIF0 bandwidth metadata.
         if_reference_frequency_hz (float | None): Optional CIF0 IF reference frequency.
         rf_reference_frequency_hz (float | None): Optional CIF0 RF reference frequency.
@@ -125,6 +110,11 @@ class IQStreamWriter:
 
     # Initial wall-clock start time (epoch seconds). If None, uses now (UTC).
     start_time_epoch_s: float | None = None
+    gps_utc_offset_s: int | None = None
+    other_epoch_s: float | None = None
+    tsi_none_reference_s: float | None = None
+    sample_count_rate_hz: float | None = None
+    free_running_rate_hz: float | None = None
 
     # Optional context metadata (CIF0)
     bandwidth_hz: float | None = None
@@ -194,16 +184,34 @@ class IQStreamWriter:
         if self.start_time_epoch_s is None:
             self.start_time_epoch_s = _now_epoch_s()
 
+        if self.sample_count_rate_hz is not None and self.sample_count_rate_hz <= 0:
+            raise ValueError("sample_count_rate_hz must be > 0 when provided")
+        if self.free_running_rate_hz is not None and self.free_running_rate_hz <= 0:
+            raise ValueError("free_running_rate_hz must be > 0 when provided")
+
     # ---------- Public API ----------
 
-    def current_time(self) -> Tuple[int, int]:
+    def _time_conversion_kwargs(self) -> dict[str, float | int | None]:
+        return {
+            "gps_utc_offset_s": self.gps_utc_offset_s,
+            "other_epoch_s": self.other_epoch_s,
+            "tsi_none_reference_s": self.tsi_none_reference_s,
+            "sample_count_rate_hz": (
+                self.sample_count_rate_hz if self.sample_count_rate_hz is not None else self.sample_rate_hz
+            ),
+            "free_running_rate_hz": (
+                self.free_running_rate_hz if self.free_running_rate_hz is not None else self.sample_rate_hz
+            ),
+        }
+
+    def current_time(self) -> Tuple[int | None, int | None]:
         """Return the current VITA 49 timestamp cursor as integer and fractional seconds.
 
         Args:
             None.
 
         Returns:
-            Tuple[int, int]: Pair of integer and 64-bit fractional seconds representing the current cursor.
+            Tuple[int | None, int | None]: Converted VITA integer/fractional timestamp fields.
 
         Raises:
             None.
@@ -218,7 +226,12 @@ class IQStreamWriter:
             True
         """
         t = self.start_time_epoch_s + (self._samples_emitted / float(self.sample_rate_hz))  # type: ignore[operator]
-        return _to_vrt_time(t)
+        return epoch_time_to_vita_timestamp(
+            t,
+            tsi=self.tsi,
+            tsf=self.tsf,
+            **self._time_conversion_kwargs(),
+        )
 
     def build_data_packet(self, iq: "np.ndarray") -> DataPacket:
         """Build a DataPacket containing the provided IQ samples and advance the cursor.
@@ -273,8 +286,8 @@ class IQStreamWriter:
             header=header,
             stream_id=self.stream_id,
             class_id=self.class_id,
-            integer_seconds=integer_seconds if self.tsi != TSI.NONE else None,
-            fractional_seconds=fractional_seconds if self.tsf != TSF.NONE else None,
+            integer_seconds=integer_seconds,
+            fractional_seconds=fractional_seconds,
             payload=payload,
         )
 
@@ -364,8 +377,8 @@ class IQStreamWriter:
             header=header,
             stream_id=self.stream_id,
             class_id=self.class_id,
-            integer_seconds=integer_seconds if self.tsi != TSI.NONE else None,
-            fractional_seconds=fractional_seconds if self.tsf != TSF.NONE else None,
+            integer_seconds=integer_seconds,
+            fractional_seconds=fractional_seconds,
             cif0=cif0,
         )
 

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, Iterable, Optional
+from typing import Deque, Iterable
 
 import numpy as np
 
@@ -43,6 +43,7 @@ from ..protocol.core import Header
 from ..protocol.enums import PacketType, TSI, TSF
 from .packet_reader import PacketReader, Readable
 from .payload_codec import payload_as_numpy
+from .time_utils import epoch_time_to_vita_timestamp, packet_vita_time_to_epoch_time
 
 
 @dataclass
@@ -145,8 +146,17 @@ class SpectrumStreamProcessor:
     power_scale: str = "dbfs"
     fft_kwargs: dict | None = None
     output_stream_id: int | None = None
+    gps_utc_offset_s: int | None = None
+    other_epoch_s: float | None = None
+    tsi_none_reference_s: float | None = None
+    sample_count_rate_hz: float | None = None
+    free_running_rate_hz: float | None = None
 
     def __post_init__(self) -> None:
+        if self.sample_count_rate_hz is not None and self.sample_count_rate_hz <= 0:
+            raise ValueError("sample_count_rate_hz must be > 0 when provided")
+        if self.free_running_rate_hz is not None and self.free_running_rate_hz <= 0:
+            raise ValueError("free_running_rate_hz must be > 0 when provided")
         self._reader = PacketReader(self.stream)
         self._queue: Deque[ContextPacket | DataPacket] = deque()
         self._packet_count = 0
@@ -231,12 +241,33 @@ class SpectrumStreamProcessor:
         elif not found:
             raise ValueError("No context packet with payload format/sample rate found")
 
+    def _time_conversion_kwargs(self) -> dict[str, float | int | None]:
+        return {
+            "gps_utc_offset_s": self.gps_utc_offset_s,
+            "other_epoch_s": self.other_epoch_s,
+            "tsi_none_reference_s": self.tsi_none_reference_s,
+            "sample_count_rate_hz": (
+                self.sample_count_rate_hz if self.sample_count_rate_hz is not None else self._sample_rate_hz
+            ),
+            "free_running_rate_hz": (
+                self.free_running_rate_hz if self.free_running_rate_hz is not None else self._sample_rate_hz
+            ),
+        }
+
     def _handle_context(self, pkt: ContextPacket) -> None:
         if pkt.stream_id is not None and self._input_stream_id is None:
             self._input_stream_id = pkt.stream_id
 
+        if pkt.cif0 is not None:
+            if pkt.cif0.payload_format is not None:
+                self._payload_format = pkt.cif0.payload_format
+            if pkt.cif0.sample_rate_hz is not None:
+                self._sample_rate_hz = float(pkt.cif0.sample_rate_hz)
+            if pkt.cif0.bandwidth_hz is not None:
+                self._bandwidth_hz = float(pkt.cif0.bandwidth_hz)
+
         if self._time_base_epoch_s is None:
-            t = _packet_time_s(pkt.integer_seconds, pkt.fractional_seconds)
+            t = packet_vita_time_to_epoch_time(pkt, **self._time_conversion_kwargs())
             if t is not None:
                 self._time_base_epoch_s = t
                 self._tsi = pkt.header.tsi
@@ -244,13 +275,6 @@ class SpectrumStreamProcessor:
 
         if pkt.cif0 is None:
             return
-
-        if pkt.cif0.payload_format is not None:
-            self._payload_format = pkt.cif0.payload_format
-        if pkt.cif0.sample_rate_hz is not None:
-            self._sample_rate_hz = float(pkt.cif0.sample_rate_hz)
-        if pkt.cif0.bandwidth_hz is not None:
-            self._bandwidth_hz = float(pkt.cif0.bandwidth_hz)
 
         if self._payload_format is None or self._sample_rate_hz is None or self._bandwidth_hz is None:
             return
@@ -322,7 +346,7 @@ class SpectrumStreamProcessor:
             self._data_packet_type = pkt.header.packet_type
 
         if self._time_base_epoch_s is None:
-            t = _packet_time_s(pkt.integer_seconds, pkt.fractional_seconds)
+            t = packet_vita_time_to_epoch_time(pkt, **self._time_conversion_kwargs())
             if t is not None:
                 self._time_base_epoch_s = t
                 self._tsi = pkt.header.tsi
@@ -354,8 +378,13 @@ class SpectrumStreamProcessor:
 
         integer_seconds = None
         fractional_seconds = None
-        if self._time_base_epoch_s is not None and self._tsi != TSI.NONE:
-            integer_seconds, fractional_seconds = _to_vrt_time(self._time_base_epoch_s)
+        if self._time_base_epoch_s is not None:
+            integer_seconds, fractional_seconds = epoch_time_to_vita_timestamp(
+                self._time_base_epoch_s,
+                tsi=self._tsi,
+                tsf=self._tsf,
+                **self._time_conversion_kwargs(),
+            )
 
         header = Header(
             packet_type=PacketType.CONTEXT_PACKET,
@@ -372,8 +401,8 @@ class SpectrumStreamProcessor:
         return ContextPacket(
             header=header,
             stream_id=stream_id,
-            integer_seconds=integer_seconds if self._tsi != TSI.NONE else None,
-            fractional_seconds=fractional_seconds if self._tsf != TSF.NONE else None,
+            integer_seconds=integer_seconds,
+            fractional_seconds=fractional_seconds,
             cif0=cif0,
         )
 
@@ -383,9 +412,14 @@ class SpectrumStreamProcessor:
 
         integer_seconds = None
         fractional_seconds = None
-        if self._time_base_epoch_s is not None and self._tsi != TSI.NONE:
+        if self._time_base_epoch_s is not None:
             t_epoch = self._time_base_epoch_s + float(frame.timestamp)
-            integer_seconds, fractional_seconds = _to_vrt_time(t_epoch)
+            integer_seconds, fractional_seconds = epoch_time_to_vita_timestamp(
+                t_epoch,
+                tsi=self._tsi,
+                tsf=self._tsf,
+                **self._time_conversion_kwargs(),
+            )
 
         packet_type = self._data_packet_type or PacketType.IF_DATA_WITH_STREAM_ID
         header = Header(
@@ -403,8 +437,8 @@ class SpectrumStreamProcessor:
         return DataPacket(
             header=header,
             stream_id=stream_id,
-            integer_seconds=integer_seconds if self._tsi != TSI.NONE else None,
-            fractional_seconds=fractional_seconds if self._tsf != TSF.NONE else None,
+            integer_seconds=integer_seconds,
+            fractional_seconds=fractional_seconds,
             payload=payload,
         )
 
@@ -475,28 +509,6 @@ class SpectrumStreamProcessor:
             f2_index=max(output_bins - 1, 0),
             window_time_delta=overlap_samples,
         )
-
-
-def _packet_time_s(integer_seconds: int | None, fractional_seconds: int | None) -> float | None:
-    if integer_seconds is None and fractional_seconds is None:
-        return None
-    sec = float(integer_seconds or 0)
-    frac = float(fractional_seconds or 0)
-    return sec + (frac / float(1 << 64))
-
-
-def _to_vrt_time(t_epoch_s: float) -> tuple[int, int]:
-    if t_epoch_s < 0:
-        sec = int(np.floor(t_epoch_s))
-    else:
-        sec = int(t_epoch_s)
-    frac = t_epoch_s - float(sec)
-    fs = int(np.floor(frac * (1 << 64) + 0.5))
-    if fs >= (1 << 64):
-        fs = 0
-        sec += 1
-    return sec, fs
-
 
 def _build_spectrum_payload_format() -> PayloadFormat:
     return PayloadFormat(
