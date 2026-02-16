@@ -234,6 +234,154 @@ class TestSpectrumStreamProcessor(unittest.TestCase):
         n = frames[0].meta["num_ffts_averaged"]
         self.assertLessEqual(abs(int(n) - expected_nominal), 1)
 
+    def test_default_hop_size_matches_fft_size(self) -> None:
+        sample_rate_hz = 640.0
+        fft_size = 64
+        output_fps = 10.0
+        n_samples = 8 * fft_size
+
+        rng = np.random.default_rng(123)
+        iq = (rng.standard_normal(n_samples) + 1j * rng.standard_normal(n_samples)).astype(np.complex64)
+
+        proc_default = SpectrumProcessor(
+            sample_rate_hz=sample_rate_hz,
+            bandwidth_hz=sample_rate_hz,
+            band_mode="full",
+            fft_size=fft_size,
+            window_type="hann",
+            averaging_mode="none",
+            averaging_param=0,
+            output_fps=output_fps,
+            output_bins=None,
+            power_scale="raw",
+            processing_mode="continuous",
+        )
+        proc_explicit = SpectrumProcessor(
+            sample_rate_hz=sample_rate_hz,
+            bandwidth_hz=sample_rate_hz,
+            band_mode="full",
+            fft_size=fft_size,
+            hop_size=fft_size,
+            window_type="hann",
+            averaging_mode="none",
+            averaging_param=0,
+            output_fps=output_fps,
+            output_bins=None,
+            power_scale="raw",
+            processing_mode="continuous",
+        )
+
+        frames_a = proc_default.push(iq)
+        frames_b = proc_explicit.push(iq)
+        self.assertEqual(len(frames_a), len(frames_b))
+        self.assertTrue(frames_a)
+        for fa, fb in zip(frames_a, frames_b):
+            self.assertAlmostEqual(fa.timestamp, fb.timestamp, places=12)
+            np.testing.assert_allclose(fa.spectrum_db, fb.spectrum_db, rtol=0.0, atol=0.0)
+
+    def test_stream_default_hop_size_matches_fft_size(self) -> None:
+        sample_rate_hz = 640.0
+        fft_size = 64
+        output_fps = 10.0
+        stream_id = 0x10203040
+
+        writer = IQStreamWriter(
+            stream_id=stream_id,
+            sample_rate_hz=sample_rate_hz,
+            bandwidth_hz=sample_rate_hz,
+        )
+
+        rng = np.random.default_rng(55)
+        n_samples = 8 * fft_size
+        iq = (rng.standard_normal(n_samples) + 1j * rng.standard_normal(n_samples)).astype(np.complex64)
+        blob = writer.build_context_packet().to_bytes() + writer.build_data_packet(iq).to_bytes()
+
+        proc_default = SpectrumStreamProcessor(
+            stream=io.BytesIO(blob),
+            fft_size=fft_size,
+            window_type="hann",
+            averaging_mode="none",
+            averaging_param=0,
+            output_fps=output_fps,
+            processing_mode="continuous",
+            band_mode="full",
+            power_scale="raw",
+        )
+        proc_explicit = SpectrumStreamProcessor(
+            stream=io.BytesIO(blob),
+            fft_size=fft_size,
+            hop_size=fft_size,
+            window_type="hann",
+            averaging_mode="none",
+            averaging_param=0,
+            output_fps=output_fps,
+            processing_mode="continuous",
+            band_mode="full",
+            power_scale="raw",
+        )
+
+        out_a = [p for p in proc_default.read_packets() if isinstance(p, DataPacket)]
+        out_b = [p for p in proc_explicit.read_packets() if isinstance(p, DataPacket)]
+        self.assertEqual(len(out_a), len(out_b))
+        self.assertTrue(out_a)
+
+        for pa, pb in zip(out_a, out_b):
+            ba = pa.payload.tobytes() if isinstance(pa.payload, memoryview) else pa.payload
+            bb = pb.payload.tobytes() if isinstance(pb.payload, memoryview) else pb.payload
+            self.assertEqual(ba, bb)
+
+    def test_stream_snapshot_mode_hop_size_independent(self) -> None:
+        sample_rate_hz = 640.0
+        fft_size = 64
+        output_fps = 10.0
+        stream_id = 0x2468ACE0
+
+        writer = IQStreamWriter(
+            stream_id=stream_id,
+            sample_rate_hz=sample_rate_hz,
+            bandwidth_hz=sample_rate_hz,
+        )
+
+        rng = np.random.default_rng(5)
+        n_samples = 8 * fft_size
+        iq = (rng.standard_normal(n_samples) + 1j * rng.standard_normal(n_samples)).astype(np.complex64)
+        blob = writer.build_context_packet().to_bytes() + writer.build_data_packet(iq).to_bytes()
+
+        proc_a = SpectrumStreamProcessor(
+            stream=io.BytesIO(blob),
+            fft_size=fft_size,
+            hop_size=1,
+            window_type="hann",
+            averaging_mode="none",
+            averaging_param=0,
+            output_fps=output_fps,
+            processing_mode="snapshot",
+            band_mode="full",
+            power_scale="raw",
+        )
+        proc_b = SpectrumStreamProcessor(
+            stream=io.BytesIO(blob),
+            fft_size=fft_size,
+            hop_size=4096,
+            window_type="hann",
+            averaging_mode="none",
+            averaging_param=0,
+            output_fps=output_fps,
+            processing_mode="snapshot",
+            band_mode="full",
+            power_scale="raw",
+        )
+
+        out_a = [p for p in proc_a.read_packets() if isinstance(p, DataPacket)]
+        out_b = [p for p in proc_b.read_packets() if isinstance(p, DataPacket)]
+        self.assertEqual(len(out_a), len(out_b))
+        self.assertTrue(out_a)
+
+        for pa, pb in zip(out_a, out_b):
+            ba = pa.payload.tobytes() if isinstance(pa.payload, memoryview) else pa.payload
+            bb = pb.payload.tobytes() if isinstance(pb.payload, memoryview) else pb.payload
+            self.assertEqual(ba, bb)
+
     def test_dbfs_scaling_tone(self) -> None:
         # With dbfs scaling enabled, a full-scale bin-centered complex tone should
         # land near 0 dBFS independent of fft_size. Raw scaling grows with fft_size.
@@ -280,6 +428,90 @@ class TestSpectrumStreamProcessor(unittest.TestCase):
         self.assertTrue(frames_raw, "No frames emitted for raw scaling")
         peak_raw = float(np.max(frames_raw[0].spectrum_db))
         self.assertGreater(peak_raw, 40.0)
+
+    def test_snapshot_mode_fixed_snapshot_windows(self) -> None:
+        sample_rate_hz = 1024.0
+        fft_size = 128
+        output_fps = 8.0
+        n_frames = 6
+        n_samples = n_frames * fft_size
+
+        rng = np.random.default_rng(7)
+        iq = (rng.standard_normal(n_samples) + 1j * rng.standard_normal(n_samples)).astype(np.complex64)
+
+        proc = SpectrumProcessor(
+            sample_rate_hz=sample_rate_hz,
+            bandwidth_hz=sample_rate_hz,
+            band_mode="full",
+            fft_size=fft_size,
+            hop_size=17,  # ignored in snapshot mode
+            window_type="rect",
+            averaging_mode="none",
+            averaging_param=0,
+            output_fps=output_fps,
+            output_bins=None,
+            power_scale="raw",
+            processing_mode="snapshot",
+        )
+
+        frames = proc.push(iq)
+        self.assertEqual(len(frames), n_frames)
+
+        for idx, frame in enumerate(frames):
+            seg = iq[idx * fft_size : (idx + 1) * fft_size]
+            expected_power = np.abs(np.fft.fft(seg, n=fft_size)) ** 2
+            expected_db = (10.0 * np.log10(np.fft.fftshift(expected_power) + 1e-20)).astype(np.float32)
+
+            np.testing.assert_allclose(frame.spectrum_db, expected_db, rtol=1e-5, atol=1e-4)
+            self.assertAlmostEqual(frame.timestamp, float(idx + 1) / output_fps, places=9)
+            self.assertEqual(frame.meta["num_ffts_averaged"], 1)
+            self.assertEqual(frame.meta["processing_mode"], "snapshot")
+
+    def test_snapshot_mode_hop_size_independent(self) -> None:
+        sample_rate_hz = 640.0
+        fft_size = 64
+        output_fps = 10.0
+        n_samples = 8 * fft_size
+
+        rng = np.random.default_rng(42)
+        iq = (rng.standard_normal(n_samples) + 1j * rng.standard_normal(n_samples)).astype(np.complex64)
+
+        proc_small_hop = SpectrumProcessor(
+            sample_rate_hz=sample_rate_hz,
+            bandwidth_hz=sample_rate_hz,
+            band_mode="full",
+            fft_size=fft_size,
+            hop_size=1,
+            window_type="hann",
+            averaging_mode="none",
+            averaging_param=0,
+            output_fps=output_fps,
+            output_bins=None,
+            power_scale="raw",
+            processing_mode="snapshot",
+        )
+        proc_large_hop = SpectrumProcessor(
+            sample_rate_hz=sample_rate_hz,
+            bandwidth_hz=sample_rate_hz,
+            band_mode="full",
+            fft_size=fft_size,
+            hop_size=4096,
+            window_type="hann",
+            averaging_mode="none",
+            averaging_param=0,
+            output_fps=output_fps,
+            output_bins=None,
+            power_scale="raw",
+            processing_mode="snapshot",
+        )
+
+        frames_a = proc_small_hop.push(iq)
+        frames_b = proc_large_hop.push(iq)
+
+        self.assertEqual(len(frames_a), len(frames_b))
+        for fa, fb in zip(frames_a, frames_b):
+            self.assertAlmostEqual(fa.timestamp, fb.timestamp, places=12)
+            np.testing.assert_allclose(fa.spectrum_db, fb.spectrum_db, rtol=0.0, atol=0.0)
 
 
 if __name__ == "__main__":

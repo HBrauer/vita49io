@@ -62,10 +62,16 @@ def _read_first_context_info(path: str) -> Tuple[Optional[float], Optional[float
 def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compute spectra from a VITA 49 file and print (spectrum, sample_rate, center_hz, time).",
+        epilog=(
+            "GNU Radio QT Frequency Sink-like snapshot example:\n"
+            "  python examples/spectrum_from_v49_file.py input.v49 "
+            "--processing-mode snapshot --fft-size 1024 --output-fps 10 "
+            "--averaging none --band-mode full --power-scale raw --window hann"
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument("input_file", help="Path to input VITA49 binary file")
     parser.add_argument("--fft-size", type=int, default=1024)
-    parser.add_argument("--hop-size", type=int, default=256)
     parser.add_argument(
         "--window",
         choices=["hann", "rect", "blackmanharris", "kaiser"],
@@ -84,6 +90,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--averaging-param", type=float, default=4)
     parser.add_argument("--output-fps", type=float, default=10.0)
+    parser.add_argument("--processing-mode", choices=["continuous", "snapshot"], default="continuous")
     parser.add_argument("--output-bins", type=int, default=None)
     parser.add_argument("--band-mode", choices=["inband", "full"], default="full")
     parser.add_argument("--dc-block", action="store_true", help="Subtract mean from each FFT segment.")
@@ -107,7 +114,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         processor = SpectrumStreamProcessor(
             stream=f,
             fft_size=args.fft_size,
-            hop_size=args.hop_size,
             window_type=args.window,
             window_param=args.window_param,
             dc_block=bool(args.dc_block),
@@ -119,6 +125,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             if args.averaging in ("exponential", "exponential_tau")
             else 0,
             output_fps=args.output_fps,
+            processing_mode=args.processing_mode,
             output_bins=args.output_bins,
             band_mode=args.band_mode,
         )

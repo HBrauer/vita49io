@@ -46,6 +46,12 @@ from .payload_codec import payload_as_numpy
 from .time_utils import epoch_time_to_vita_timestamp, packet_vita_time_to_epoch_time
 
 
+def _normalize_processing_mode(processing_mode: str) -> str:
+    if processing_mode in {"continuous", "snapshot"}:
+        return processing_mode
+    raise ValueError("processing_mode must be 'continuous' or 'snapshot'")
+
+
 @dataclass
 class SpectrumStreamProcessor:
     """Convert VITA 49 IQ streams into VITA 49 spectral data packets.
@@ -64,7 +70,6 @@ class SpectrumStreamProcessor:
         processor = SpectrumStreamProcessor(
             stream=f,
             fft_size=1024,
-            hop_size=256,
             window_type="hann",
             averaging_mode="frame_mean",
             averaging_param=0,
@@ -76,6 +81,25 @@ class SpectrumStreamProcessor:
             handle(pkt)
     ```
 
+    Snapshot-mode example (GNU Radio QT Frequency Sink-like defaults):
+    ```python
+    from vita49io.io.spectrum_processor import SpectrumStreamProcessor
+
+    with open("input.v49", "rb") as f:
+        processor = SpectrumStreamProcessor(
+            stream=f,
+            fft_size=1024,
+            processing_mode="snapshot",
+            output_fps=10.0,     # GR update_time=0.1 s
+            averaging_mode="none",
+            band_mode="full",
+            power_scale="raw",
+            window_type="hann",  # match your GNU Radio window setting
+        )
+        for pkt in processor.read_packets():
+            handle(pkt)
+    ```
+
     Parameters and behavior
     -----------------------
     - `stream`: Readable byte stream containing VITA 49 packets. The stream must be
@@ -84,8 +108,11 @@ class SpectrumStreamProcessor:
     - `fft_size`: FFT length in samples. Controls frequency resolution
       (`sample_rate_hz / fft_size`) and the number of input samples required per
       transform.
-    - `hop_size`: Advance in samples between consecutive FFTs. Smaller hop sizes
-      increase overlap and time resolution at the cost of more computation.
+    - `hop_size`: Optional advance in samples between consecutive FFTs.
+      - In `"continuous"` mode this is the FFT step size. Defaults to `fft_size`
+        (no overlap). Use `hop_size < fft_size` for overlap.
+      - In `"snapshot"` mode this parameter is ignored for FFT cadence. One FFT is
+        computed per output frame from the most recent `fft_size` samples.
     - `window_type`: `"hann"`, `"rect"`, `"blackmanharris"`, or `"kaiser"`. A Hann
       window reduces spectral leakage but widens the main lobe; a rectangular
       window preserves resolution but leaks more. Blackman-Harris further reduces
@@ -108,6 +135,10 @@ class SpectrumStreamProcessor:
     - `output_fps`: Target output frames per second. The processor emits spectra
       on a time grid derived from the input sample rate, regardless of how many
       FFTs were computed in that interval.
+    - `processing_mode`:
+      - `"continuous"` (default): STFT style processing over every hop-sized step.
+      - `"snapshot"`: one FFT is
+        computed per output frame using the most recent `fft_size` samples.
     - `output_bins`: Number of frequency bins in the emitted spectrum. If `None`,
       defaults to the native bin count (full band: `fft_size`; inband: the number
       of FFT bins within `[-bandwidth/2, +bandwidth/2]`). If it differs from the
@@ -134,11 +165,12 @@ class SpectrumStreamProcessor:
 
     stream: Readable
     fft_size: int
-    hop_size: int
-    window_type: str
-    averaging_mode: str
-    averaging_param: float | int
-    output_fps: float
+    hop_size: int | None = None
+    window_type: str = "hann"
+    averaging_mode: str = "frame_mean"
+    averaging_param: float | int = 0
+    output_fps: float = 10.0
+    processing_mode: str = "continuous"
     output_bins: int | None = None
     band_mode: str = "inband"
     window_param: float | None = None
@@ -153,10 +185,17 @@ class SpectrumStreamProcessor:
     free_running_rate_hz: float | None = None
 
     def __post_init__(self) -> None:
+        if self.hop_size is None:
+            self.hop_size = int(self.fft_size)
+        else:
+            self.hop_size = int(self.hop_size)
+        if self.hop_size <= 0:
+            raise ValueError("hop_size must be > 0 when provided")
         if self.sample_count_rate_hz is not None and self.sample_count_rate_hz <= 0:
             raise ValueError("sample_count_rate_hz must be > 0 when provided")
         if self.free_running_rate_hz is not None and self.free_running_rate_hz <= 0:
             raise ValueError("free_running_rate_hz must be > 0 when provided")
+        self.processing_mode = _normalize_processing_mode(self.processing_mode)
         self._reader = PacketReader(self.stream)
         self._queue: Deque[ContextPacket | DataPacket] = deque()
         self._packet_count = 0
@@ -290,6 +329,7 @@ class SpectrumStreamProcessor:
                 window_param=self.window_param,
                 dc_block=self.dc_block,
                 power_scale=self.power_scale,
+                processing_mode=self.processing_mode,
                 averaging_mode=self.averaging_mode,
                 averaging_param=self.averaging_param,
                 output_fps=self.output_fps,
@@ -309,6 +349,7 @@ class SpectrumStreamProcessor:
                 window_param=self.window_param,
                 dc_block=self.dc_block,
                 power_scale=self.power_scale,
+                processing_mode=self.processing_mode,
                 averaging_mode=self.averaging_mode,
                 averaging_param=self.averaging_param,
                 output_fps=self.output_fps,
@@ -333,6 +374,7 @@ class SpectrumStreamProcessor:
                 window_param=self.window_param,
                 dc_block=self.dc_block,
                 power_scale=self.power_scale,
+                processing_mode=self.processing_mode,
                 averaging_mode=self.averaging_mode,
                 averaging_param=self.averaging_param,
                 output_fps=self.output_fps,
@@ -467,9 +509,12 @@ class SpectrumStreamProcessor:
             weighting_factor = 0
         elif self.averaging_mode == "frame_mean":
             averaging_type = AveragingType.LINEAR
-            nominal = int(
-                round(self._sample_rate_hz / (float(self.hop_size) * float(self.output_fps)))
-            )
+            if self.processing_mode == "snapshot":
+                nominal = 1
+            else:
+                nominal = int(
+                    round(self._sample_rate_hz / (float(self.hop_size) * float(self.output_fps)))
+                )
             number_of_averages = max(nominal, 1)
             weighting_factor = 0
         elif self.averaging_mode == "peak_hold":
@@ -485,11 +530,17 @@ class SpectrumStreamProcessor:
             averaging_type = AveragingType.EXPONENTIAL
             number_of_averages = 1
             tau = float(self.averaging_param)
-            dt_s = float(self.hop_size) / float(self._sample_rate_hz)
+            if self.processing_mode == "snapshot":
+                dt_s = 1.0 / float(self.output_fps)
+            else:
+                dt_s = float(self.hop_size) / float(self._sample_rate_hz)
             alpha = 1.0 - float(np.exp(-dt_s / tau))
             weighting_factor = int(round(alpha * (1 << 16)))
 
-        overlap_samples = max(self.fft_size - self.hop_size, 0)
+        if self.processing_mode == "snapshot":
+            overlap_samples = 0
+        else:
+            overlap_samples = max(self.fft_size - self.hop_size, 0)
         span_hz = self._sample_rate_hz if self.band_mode == "full" else self._bandwidth_hz
 
         resolution_hz = span_hz / float(output_bins)

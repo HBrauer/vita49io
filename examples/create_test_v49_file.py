@@ -87,7 +87,8 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
               - Exactly {SAMPLES_PER_PACKET} IQ samples are written to every data packet.
               - If --duration-seconds is used, packet count is ceil(duration * sample_rate / {SAMPLES_PER_PACKET}).
               - The generated tone is always complex (analytic): exp(j*2*pi*f*t).
-              - --noise-amplitude follows GNU Radio style: Gaussian std-dev applied per I and Q component.
+              - --noise-amplitude follows GNU Radio noise_source_c (GR_GAUSSIAN):
+                I/Q std-dev is amplitude/sqrt(2), so E[|n|^2] = amplitude^2.
             """
         ),
     )
@@ -136,7 +137,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         "--noise-amplitude",
         type=_non_negative_float,
         default=0.0,
-        help="Gaussian noise amplitude (std-dev per I and Q component)",
+        help="Gaussian complex noise amplitude (GNU Radio noise_source_c equivalent)",
     )
     parser.add_argument(
         "--stream-id",
@@ -178,10 +179,12 @@ def _synthesize_packet_iq(
     iq = (cosine_amplitude * np.exp(1j * phase)).astype(np.complex64)
 
     if noise_amplitude > 0.0:
+        # Match GNU Radio noise_source_c (GR_GAUSSIAN): per-component sigma = ampl/sqrt(2).
+        sigma = np.float32(noise_amplitude / math.sqrt(2.0))
         noise = (
             rng.standard_normal(SAMPLES_PER_PACKET, dtype=np.float32)
             + 1j * rng.standard_normal(SAMPLES_PER_PACKET, dtype=np.float32)
-        ) * np.float32(noise_amplitude)
+        ) * sigma
         iq = iq + noise.astype(np.complex64)
 
     return iq.astype(np.complex64, copy=False)

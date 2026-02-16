@@ -30,6 +30,12 @@ class SpectrumFrame:
     meta: dict
 
 
+def _normalize_processing_mode(processing_mode: str) -> str:
+    if processing_mode in {"continuous", "snapshot"}:
+        return processing_mode
+    raise ValueError("processing_mode must be 'continuous' or 'snapshot'")
+
+
 class SpectrumProcessor:
     def __init__(
         self,
@@ -37,17 +43,18 @@ class SpectrumProcessor:
         bandwidth_hz: float,
         band_mode: str,
         fft_size: int,
-        hop_size: int,
-        window_type: str,
-        averaging_mode: str,
-        averaging_param: float | int,
-        output_fps: float,
-        output_bins: int | None,
+        hop_size: int | None = None,
+        window_type: str = "hann",
+        averaging_mode: str = "frame_mean",
+        averaging_param: float | int = 0,
+        output_fps: float = 10.0,
+        output_bins: int | None = None,
         fft_kwargs: dict | None = None,
         *,
         window_param: float | None = None,
         dc_block: bool = False,
         power_scale: str = "dbfs",
+        processing_mode: str = "continuous",
     ) -> None:
         if sample_rate_hz <= 0:
             raise ValueError("sample_rate_hz must be > 0")
@@ -55,6 +62,9 @@ class SpectrumProcessor:
             raise ValueError("bandwidth_hz must be in (0, sample_rate_hz]")
         if fft_size <= 0:
             raise ValueError("fft_size must be > 0")
+        if hop_size is None:
+            hop_size = int(fft_size)
+        hop_size = int(hop_size)
         if hop_size <= 0:
             raise ValueError("hop_size must be > 0")
         if output_fps <= 0:
@@ -103,7 +113,7 @@ class SpectrumProcessor:
         self.bandwidth_hz = float(bandwidth_hz)
         self.band_mode = band_mode
         self.fft_size = int(fft_size)
-        self.hop_size = int(hop_size)
+        self.hop_size = hop_size
         self.window_type = window_type
         self.window_param = window_param
         self.dc_block = dc_block
@@ -113,6 +123,7 @@ class SpectrumProcessor:
         self.output_fps = float(output_fps)
         self.output_bins = int(output_bins)
         self.fft_kwargs = dict(fft_kwargs) if fft_kwargs is not None else {}
+        self.processing_mode = _normalize_processing_mode(processing_mode)
 
         if window_type == "hann":
             self._window = np.hanning(self.fft_size).astype(np.float32)
@@ -147,8 +158,11 @@ class SpectrumProcessor:
     def _reset_state(self) -> None:
         self._buffer = np.empty(0, dtype=np.complex64)
         self._buffer_start = 0
+        self._buffer_abs_start = 0
+        self._samples_seen = 0
         self._total_samples_processed = 0
-        self._next_frame_time = 1.0 / self.output_fps
+        self._frame_interval_s = 1.0 / self.output_fps
+        self._next_frame_time = self._frame_interval_s
         self._last_power: np.ndarray | None = None
         self._mean_sum: np.ndarray | None = None
         self._mean_count = 0
@@ -171,17 +185,19 @@ class SpectrumProcessor:
         if iq_array.size:
             self._buffer = np.concatenate((self._buffer, iq_array))
 
+        if self.processing_mode == "snapshot":
+            if iq_array.size:
+                self._samples_seen += int(iq_array.size)
+            self._total_samples_processed = self._samples_seen
+            return self._push_snapshot()
+
+        return self._push_continuous()
+
+    def _push_continuous(self) -> list[SpectrumFrame]:
         frames: list[SpectrumFrame] = []
         while self._buffer_start + self.fft_size <= self._buffer.size:
             segment = self._buffer[self._buffer_start : self._buffer_start + self.fft_size]
-            if self.dc_block:
-                mean = segment.mean(dtype=np.complex64)
-                segment = segment - mean
-            windowed = segment * self._window
-            spectrum = fft(windowed, n=self.fft_size, **self.fft_kwargs)
-            power = (np.abs(spectrum) ** 2).astype(np.float32)
-
-            self._update_averaging(power)
+            self._update_averaging(self._segment_power(segment))
 
             self._buffer_start += self.hop_size
             self._total_samples_processed += self.hop_size
@@ -195,9 +211,46 @@ class SpectrumProcessor:
                 frame = self._emit_frame(current_time)
                 if frame is not None:
                     frames.append(frame)
-                self._next_frame_time += 1.0 / self.output_fps
+                self._next_frame_time += self._frame_interval_s
 
         return frames
+
+    def _push_snapshot(self) -> list[SpectrumFrame]:
+        frames: list[SpectrumFrame] = []
+        current_time = self._samples_seen / self.sample_rate_hz
+
+        while current_time >= self._next_frame_time:
+            frame_sample = int(np.floor(self._next_frame_time * self.sample_rate_hz))
+            segment_start = frame_sample - self.fft_size
+            segment_end = frame_sample
+            offset_start = segment_start - self._buffer_abs_start
+            offset_end = segment_end - self._buffer_abs_start
+
+            if offset_start >= 0 and offset_end <= self._buffer.size:
+                segment = self._buffer[offset_start:offset_end]
+                self._update_averaging(self._segment_power(segment))
+                frame = self._emit_frame(self._next_frame_time)
+                if frame is not None:
+                    frames.append(frame)
+
+            self._next_frame_time += self._frame_interval_s
+
+        min_needed_start = int(np.floor(self._next_frame_time * self.sample_rate_hz)) - self.fft_size
+        drop = min_needed_start - self._buffer_abs_start
+        if drop > 0:
+            drop = min(drop, self._buffer.size)
+            self._buffer = self._buffer[drop:]
+            self._buffer_abs_start += drop
+
+        return frames
+
+    def _segment_power(self, segment: np.ndarray) -> np.ndarray:
+        if self.dc_block:
+            mean = segment.mean(dtype=np.complex64)
+            segment = segment - mean
+        windowed = segment * self._window
+        spectrum = fft(windowed, n=self.fft_size, **self.fft_kwargs)
+        return (np.abs(spectrum) ** 2).astype(np.float32)
 
     def _update_averaging(self, power: np.ndarray) -> None:
         if self.averaging_mode == "none":
@@ -234,7 +287,10 @@ class SpectrumProcessor:
             alpha = float(self.averaging_param)
         else:
             tau = float(self.averaging_param)
-            dt_s = float(self.hop_size) / float(self.sample_rate_hz)
+            if self.processing_mode == "snapshot":
+                dt_s = self._frame_interval_s
+            else:
+                dt_s = float(self.hop_size) / float(self.sample_rate_hz)
             alpha = 1.0 - float(np.exp(-dt_s / tau))
 
         if self._ema_state is None:
@@ -313,6 +369,7 @@ class SpectrumProcessor:
             "rbw_hz": self.sample_rate_hz / self.fft_size,
             "band_mode": self.band_mode,
             "bandwidth_hz": self.bandwidth_hz,
+            "processing_mode": self.processing_mode,
             "dc_block": self.dc_block,
             "power_scale": self.power_scale,
             "coherent_gain": self._coherent_gain,
@@ -332,14 +389,12 @@ if __name__ == "__main__":
     rng = np.random.default_rng(0)
     sample_rate = 1.0e6
     fft_size = 1024
-    hop_size = 256
 
     processor = SpectrumProcessor(
         sample_rate_hz=sample_rate,
         bandwidth_hz=400e3,
         band_mode="inband",
         fft_size=fft_size,
-        hop_size=hop_size,
         window_type="hann",
         window_param=None,
         dc_block=False,

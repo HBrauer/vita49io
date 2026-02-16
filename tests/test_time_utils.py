@@ -128,7 +128,30 @@ class TestTimeUtils(unittest.TestCase):
         assert t_from_pkt is not None
         self.assertLessEqual(abs(t_from_pkt - t_epoch_s), 2e-6)
 
+    def test_packet_helper_data_packet_without_kwargs(self) -> None:
+        t_epoch_s = 1_700_000_300.875125
+        integer_seconds, fractional_seconds = epoch_time_to_vita_timestamp(
+            t_epoch_s,
+            tsi=TSI.UTC,
+            tsf=TSF.FRACTIONAL,
+        )
+        self.assertIsNotNone(integer_seconds)
+        self.assertIsNotNone(fractional_seconds)
+
+        pkt = DataPacket(
+            packet_type=PacketType.IF_DATA_WITHOUT_STREAM_ID,
+            tsi=TSI.UTC,
+            tsf=TSF.FRACTIONAL,
+            integer_seconds=integer_seconds,
+            fractional_seconds=fractional_seconds,
+            payload=b"",
+        )
+
+        t_from_pkt = packet_vita_time_to_epoch_time(pkt)
+        self.assertIsNotNone(t_from_pkt)
+        assert t_from_pkt is not None
+        self.assertLessEqual(abs(t_from_pkt - t_epoch_s), 2e-6)
+
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -117,3 +117,29 @@ open("out.v49", "wb").write(out)
 ## 6. Explore the API reference
 
 The [API reference](reference/vita49io.md) is generated directly from the codebase using mkdocstrings, so it always reflects the latest implementation.
+
+## 7. Spectrum Processor defaults
+
+For `SpectrumStreamProcessor` and `SpectrumProcessor` in `processing_mode="continuous"`:
+
+- If `hop_size` is omitted, it defaults to `fft_size` (no overlap).
+- Set `hop_size < fft_size` when you want overlap.
+- In `processing_mode="snapshot"`, `hop_size` does not control FFT cadence.
+  One FFT is computed per output frame from the latest `fft_size` samples.
+
+GNU Radio QT Frequency Sink-like snapshot settings:
+
+```python
+from vita49io.io.spectrum_processor import SpectrumStreamProcessor
+
+processor = SpectrumStreamProcessor(
+    stream=f,
+    fft_size=1024,
+    processing_mode="snapshot",
+    output_fps=10.0,
+    averaging_mode="none",
+    band_mode="full",
+    power_scale="raw",
+    window_type="hann",  # set to match GNU Radio sink window
+)
+```
