@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
-from scipy.signal import lfilter, upfirdn
+from scipy.signal import upfirdn
 from scipy.signal._upfirdn import _output_len as _upfirdn_output_len
 
 from vita49io.defaults.default_payload_formats import DefaultPayloadFormats
@@ -57,11 +58,12 @@ class StreamingResampler:
         self._h_len = int(self.h.size)
         self._n_seen = 0
 
-        # Fast exact path for pure decimation.
+        # Fast exact path for pure decimation using chunked upfirdn.
         if self.up == 1:
             self._mode = "decimate"
-            self._zi = np.zeros(max(self._h_len - 1, 0), dtype=np.complex64)
-            self._phase = 0
+            self._history_max = max(self._h_len + self.down - 2, 0)
+            self._history = np.empty(0, dtype=np.complex64)
+            self._flushed = False
             return
 
         # General exact rational path.
@@ -84,13 +86,88 @@ class StreamingResampler:
         )
         return min(causal_target, upfirdn_target)
 
-    def _take_decimated(self, y: np.ndarray) -> np.ndarray:
-        if y.size == 0:
+    def _get_tail_history(self, n_seen: int, hist_len: int) -> np.ndarray:
+        if hist_len <= 0:
             return np.empty(0, dtype=np.complex64)
-        start = (-self._phase) % self.down
-        out = np.asarray(y[start:: self.down], dtype=np.complex64)
-        self._phase = (self._phase + int(y.size)) % self.down
+
+        if n_seen <= 0:
+            return np.zeros(hist_len, dtype=np.complex64)
+
+        have = min(int(self._history.size), int(n_seen))
+        if have >= hist_len:
+            return np.asarray(self._history[-hist_len:], dtype=np.complex64)
+
+        pad = hist_len - have
+        if have == 0:
+            return np.zeros(hist_len, dtype=np.complex64)
+        return np.concatenate(
+            [np.zeros(pad, dtype=np.complex64), self._history[-have:]]
+        )
+
+    def _append_history(self, packet: np.ndarray) -> None:
+        if packet.size == 0:
+            return
+        if self._history.size == 0:
+            self._history = np.asarray(packet, dtype=np.complex64).reshape(-1)
+        else:
+            self._history = np.concatenate([self._history, packet])
+        if self._history.size > self._history_max:
+            self._history = self._history[-self._history_max :]
+
+    def _process_decimate_upfirdn(self, packet: np.ndarray) -> np.ndarray:
+        n0 = self._n_seen
+        n = int(packet.size)
+        if n == 0:
+            return np.empty(0, dtype=np.complex64)
+
+        align = int((n0 - (self._h_len - 1)) % self.down)
+        hist_len = int((self._h_len - 1) + align)
+        hist = self._get_tail_history(n_seen=n0, hist_len=hist_len)
+        xin = np.concatenate([hist, packet]) if hist.size else np.asarray(packet, dtype=np.complex64)
+
+        # start_idx is aligned to the global downsample grid.
+        start_idx = int(n0 - hist_len)
+        y = upfirdn(self.h, xin, up=1, down=self.down)
+
+        t_lo = n0
+        t_hi = n0 + n - 1
+        p_lo = int((t_lo - start_idx + self.down - 1) // self.down)
+        p_hi = int((t_hi - start_idx) // self.down)
+
+        if p_hi < p_lo:
+            out = np.empty(0, dtype=np.complex64)
+        else:
+            out = np.asarray(y[p_lo : p_hi + 1], dtype=np.complex64)
+
+        self._n_seen += n
+        self._append_history(np.asarray(packet, dtype=np.complex64).reshape(-1))
         return out
+
+    def _flush_decimate_upfirdn(self) -> np.ndarray:
+        if self._n_seen == 0 or self._flushed or self._h_len <= 1:
+            return np.empty(0, dtype=np.complex64)
+
+        n0 = self._n_seen
+        tail_n = self._h_len - 1
+        tail = np.zeros(tail_n, dtype=np.complex64)
+
+        align = int((n0 - (self._h_len - 1)) % self.down)
+        hist_len = int((self._h_len - 1) + align)
+        hist = self._get_tail_history(n_seen=n0, hist_len=hist_len)
+        xin = np.concatenate([hist, tail]) if hist.size else tail
+
+        start_idx = int(n0 - hist_len)
+        y = upfirdn(self.h, xin, up=1, down=self.down)
+
+        t_lo = n0
+        t_hi = n0 + tail_n - 1
+        p_lo = int((t_lo - start_idx + self.down - 1) // self.down)
+        p_hi = int((t_hi - start_idx) // self.down)
+
+        self._flushed = True
+        if p_hi < p_lo:
+            return np.empty(0, dtype=np.complex64)
+        return np.asarray(y[p_lo : p_hi + 1], dtype=np.complex64)
 
     def _emit_polyphase_until(self, target_outputs: int) -> np.ndarray:
         if target_outputs <= self._m_emitted:
@@ -146,14 +223,10 @@ class StreamingResampler:
         if packet.size == 0:
             return np.empty(0, dtype=np.complex64)
 
-        self._n_seen += int(packet.size)
-
         if self._mode == "decimate":
-            if self._zi.size:
-                y, self._zi = lfilter(self.h, [1.0], packet, zi=self._zi)
-            else:
-                y = lfilter(self.h, [1.0], packet)
-            return self._take_decimated(np.asarray(y, dtype=np.complex64))
+            return self._process_decimate_upfirdn(packet)
+
+        self._n_seen += int(packet.size)
 
         self._input = np.concatenate([self._input, packet])
         target_outputs = self._prefix_output_target(self._n_seen)
@@ -164,15 +237,7 @@ class StreamingResampler:
             return np.empty(0, dtype=np.complex64)
 
         if self._mode == "decimate":
-            if self._h_len <= 1:
-                return np.empty(0, dtype=np.complex64)
-            z = np.zeros(self._h_len - 1, dtype=np.complex64)
-            if self._zi.size:
-                y, self._zi = lfilter(self.h, [1.0], z, zi=self._zi)
-                self._zi = np.zeros_like(self._zi)
-            else:
-                y = np.empty(0, dtype=np.complex64)
-            return self._take_decimated(np.asarray(y, dtype=np.complex64))
+            return self._flush_decimate_upfirdn()
 
         total_outputs = int(
             _upfirdn_output_len(self._h_len, self._n_seen, self.up, self.down)
@@ -229,7 +294,28 @@ def _load_toml_module():
 
 
 def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="DDC a VITA 49 file (resample + re-pack).")
+    parser = argparse.ArgumentParser(
+        description="DDC a VITA 49 file (resample + re-pack).",
+        epilog=(
+            "Examples:\n"
+            "  python examples/ddc_v49_file.py in.v49 out.v49 \\\n"
+            "    --output-format S16_IQ \\\n"
+            "    --output-sample-rate 2048000\n"
+            "\n"
+            "  python examples/ddc_v49_file.py in.v49 out_shifted.v49 \\\n"
+            "    --output-format F32_IQ \\\n"
+            "    --output-sample-rate 1024000 \\\n"
+            "    --center-frequency-offset-hz -250000\n"
+            "\n"
+            "  python examples/ddc_v49_file.py in.v49 out_custom.v49 \\\n"
+            "    --output-format S16_IQ \\\n"
+            "    --output-sample-rate 1024000 \\\n"
+            "    --config examples/ddc_v49_file.toml \\\n"
+            "    --chunk-samples 61140 \\\n"
+            "    --samples-per-packet 1024"
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
     parser.add_argument("input_file", help="Path to input .v49 file")
     parser.add_argument("output_file", help="Path to output .v49 file")
     parser.add_argument(
@@ -282,6 +368,11 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         type=int,
         default=1024,
         help="Number of complex samples per output data packet",
+    )
+    parser.add_argument(
+        "--timing",
+        action="store_true",
+        help="Print elapsed conversion time after completion",
     )
     return parser.parse_args(argv)
 
@@ -929,6 +1020,7 @@ def convert_v49_ddc(
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = _parse_args(argv)
+    start_time = time.perf_counter() if bool(args.timing) else None
 
     try:
         summary = convert_v49_ddc(
@@ -966,6 +1058,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         f"Output samples: {summary['output_samples']}, "
         f"Data packets written: {summary['data_packets_written']}"
     )
+    if start_time is not None:
+        elapsed_s = time.perf_counter() - start_time
+        print(f"Timing: elapsed {elapsed_s:.3f} s")
     return 0
 
 
