@@ -621,6 +621,7 @@ def _worst_unwanted_dbc(
     tone_db: float,
     half_bw_hz: float,
     protected_hz: Sequence[float],
+    protected_spans_hz: Sequence[Tuple[float, float]] = (),
     guard_hz: float,
 ) -> float:
     if freqs.size == 0 or db.size == 0:
@@ -629,6 +630,10 @@ def _worst_unwanted_dbc(
     mask = np.abs(freqs) <= float(half_bw_hz)
     for f0 in protected_hz:
         mask &= np.abs(freqs - float(f0)) > float(guard_hz)
+    for center_hz, half_span_hz in protected_spans_hz:
+        if half_span_hz <= 0.0:
+            continue
+        mask &= np.abs(freqs - float(center_hz)) > float(half_span_hz)
 
     if not np.any(mask):
         return float("-inf")
@@ -708,8 +713,23 @@ def evaluate_output_metrics(
             protected.append(blocker_shifted)
 
     protect_hz = max(250.0, 4.0 * bin_hz)
+    protected_spans_hz: List[Tuple[float, float]] = []
+    tone_span_hz = max(protect_hz, 8.0 * bin_hz)
+    protected_spans_hz.append((tone_expected_hz, tone_span_hz))
+    am_span_hz = max(protect_hz, 3.0 * float(scenario.am.modulation_frequency_hz))
+    protected_spans_hz.append((am_carrier_out_hz, am_span_hz))
+    fsk_center_out_hz = 0.5 * (fsk_mark_out_hz + fsk_space_out_hz)
+    fsk_dev_hz = 0.5 * abs(fsk_mark_out_hz - fsk_space_out_hz)
+    fsk_span_hz = max(
+        protect_hz,
+        float(fsk_dev_hz + 6.0 * float(scenario.fsk.symbol_rate_hz)),
+    )
+    protected_spans_hz.append((fsk_center_out_hz, fsk_span_hz))
+
     for blocker in scenario.blockers:
         blocker_shifted = float(blocker.frequency_hz - scenario.center_frequency_offset_hz)
+        if abs(blocker_shifted) <= half_bw:
+            protected_spans_hz.append((blocker_shifted, protect_hz))
         alias_hz = fold_frequency_hz(blocker_shifted, sample_rate_hz)
         if abs(alias_hz) > half_bw:
             blocker_dbc.append(float("-inf"))
@@ -737,6 +757,7 @@ def evaluate_output_metrics(
         tone_db=tone_db,
         half_bw_hz=half_bw,
         protected_hz=protected,
+        protected_spans_hz=protected_spans_hz,
         guard_hz=unwanted_guard_hz,
     )
 
@@ -811,8 +832,10 @@ def write_waterfall_svg(
     sample_rate_hz: float,
     output_svg: Path,
     title: str,
+    output_bandwidth_hz: Optional[float] = None,
     fft_size: int = 1024,
     overlap: float = 0.75,
+    db_span: float = 90.0,
 ) -> bool:
     hop = max(1, int(round(float(fft_size) * (1.0 - float(overlap)))))
     db, freqs, times = _stft_waterfall(iq, float(sample_rate_hz), int(fft_size), hop)
@@ -827,8 +850,8 @@ def write_waterfall_svg(
     except Exception:
         return False
 
-    lo = float(np.percentile(db, 5))
-    hi = float(np.percentile(db, 99))
+    hi = float(np.max(db))
+    lo = float(hi - max(20.0, float(db_span)))
     img = np.clip(db, lo, hi)
 
     output_svg = output_svg.expanduser()
@@ -843,7 +866,17 @@ def write_waterfall_svg(
         extent=extent,
         interpolation="nearest",
         cmap="viridis",
+        vmin=lo,
+        vmax=hi,
     )
+    if output_bandwidth_hz is not None and output_bandwidth_hz > 0:
+        half_bw = min(float(output_bandwidth_hz) / 2.0, float(sample_rate_hz) / 2.0)
+        if half_bw > 0:
+            ax = plt.gca()
+            ax.axvspan(freqs[0], -half_bw, color="white", alpha=0.08, lw=0)
+            ax.axvspan(half_bw, freqs[-1], color="white", alpha=0.08, lw=0)
+            ax.axvline(-half_bw, color="white", linestyle="--", linewidth=1.0, alpha=0.8)
+            ax.axvline(half_bw, color="white", linestyle="--", linewidth=1.0, alpha=0.8)
     plt.colorbar(label="Power (dB)")
     plt.xlabel("Frequency (Hz)")
     plt.ylabel("Time (s)")

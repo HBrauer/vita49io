@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -17,6 +18,7 @@ from vita49io.io.frequency import StreamingFrequencyShifter
 from vita49io.io.iq_writer import IQStreamWriter
 from vita49io.io.packet_reader import PacketReader, RawDataPacket
 from vita49io.io.payload_codec import build_payload_decoder
+from vita49io.protocol.cif0 import PayloadFormat, SampleType
 from vita49io.protocol.context_packet import ContextPacket
 from vita49io.protocol.enums import PacketType, TSI, TSF
 
@@ -350,7 +352,40 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Print elapsed conversion time after completion",
     )
+    parser.add_argument(
+        "--start-time",
+        default=None,
+        help=(
+            "Optional UTC start time for packet-level time slicing (ISO-8601, "
+            "e.g. 2026-01-01T12:34:56Z). Packets overlapping the window are kept."
+        ),
+    )
+    parser.add_argument(
+        "--end-time",
+        default=None,
+        help=(
+            "Optional UTC end time for packet-level time slicing (ISO-8601, "
+            "e.g. 2026-01-01T12:35:56Z). Packets overlapping the window are kept."
+        ),
+    )
     return parser.parse_args(argv)
+
+
+def _parse_iso_utc_time(value: str, *, option_name: str) -> float:
+    text = str(value).strip()
+    if not text:
+        raise ValueError(f"{option_name} must not be empty")
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise ValueError(
+            f"{option_name} must be ISO UTC time like YYYY-MM-DDThh:mm:ssZ"
+        ) from exc
+    if dt.tzinfo is None:
+        raise ValueError(f"{option_name} must include timezone (use trailing 'Z')")
+    return float(dt.astimezone(timezone.utc).timestamp())
 
 
 def _packet_time_s(integer_seconds: Optional[int], fractional_seconds: Optional[int]) -> Optional[float]:
@@ -371,6 +406,26 @@ def _resolve_input_format_name(pf, supported_formats: Dict[str, Any]) -> Optiona
 def _resample_ratio(in_rate_hz: int, out_rate_hz: int) -> Tuple[int, int]:
     frac = Fraction(int(out_rate_hz), int(in_rate_hz))
     return frac.numerator, frac.denominator
+
+
+def _packet_sample_count(payload: memoryview, payload_format: PayloadFormat) -> int:
+    bits_per_component = int(payload_format.item_packing_field_size_bits)
+    if bits_per_component <= 0 or bits_per_component % 8 != 0:
+        raise ValueError(
+            "Unsupported payload format for time slicing: "
+            f"item_packing_field_size_bits={bits_per_component}"
+        )
+    components_per_sample = (
+        2 if payload_format.sample_type == SampleType.COMPLEX_CARTESIAN else 1
+    )
+    bytes_per_sample = (bits_per_component // 8) * components_per_sample
+    payload_nbytes = int(len(payload))
+    if bytes_per_sample <= 0 or payload_nbytes % bytes_per_sample != 0:
+        raise ValueError(
+            "Payload length is not aligned to sample size for time slicing: "
+            f"bytes={payload_nbytes}, bytes_per_sample={bytes_per_sample}"
+        )
+    return payload_nbytes // bytes_per_sample
 
 
 def _parse_taps(taps_raw, label: str) -> Optional[np.ndarray]:
@@ -571,14 +626,6 @@ def _build_runtime_stage_chain(decimator_path: DecimatorPath) -> list[RuntimeDec
             stage_cfg.input_sample_rate_hz,
             stage_cfg.output_sample_rate_hz,
         )
-        if up != 1:
-            raise ValueError(
-                "Non-integer decimation is not supported for file DDC. "
-                f"Stage #{idx} has ratio {stage_cfg.input_sample_rate_hz} -> "
-                f"{stage_cfg.output_sample_rate_hz} (up={up}, down={down}). "
-                "Use output sample rates where each stage is an integer decimation "
-                "(input_sample_rate % output_sample_rate == 0)."
-            )
         if (up != 1 or down != 1) and stage_cfg.taps is None:
             raise ValueError(
                 f"Stage #{idx} is missing 'taps' for "
@@ -715,6 +762,8 @@ def convert_v49_ddc(
     config_path: Optional[Path] = None,
     center_frequency_hz: Optional[float] = None,
     center_frequency_offset_hz: Optional[float] = None,
+    start_time_epoch_s: Optional[float] = None,
+    end_time_epoch_s: Optional[float] = None,
 ) -> Dict[str, int]:
     config_path = (config_path or DEFAULT_DECIMATOR_CONFIG_PATH).expanduser()
     decimator_paths = _load_decimator_paths(config_path)
@@ -745,6 +794,12 @@ def convert_v49_ddc(
         raise ValueError("chunk_samples must be > 0")
     if samples_per_packet <= 0:
         raise ValueError("samples_per_packet must be > 0")
+    if (
+        start_time_epoch_s is not None
+        and end_time_epoch_s is not None
+        and float(end_time_epoch_s) < float(start_time_epoch_s)
+    ):
+        raise ValueError("end_time_epoch_s must be >= start_time_epoch_s")
 
     input_path = input_path.expanduser()
     output_path = output_path.expanduser()
@@ -791,6 +846,8 @@ def convert_v49_ddc(
     context_packets_seen = 0
     skipped_packets = 0
     output_bandwidth_hz: Optional[int] = None
+    time_window_enabled = (start_time_epoch_s is not None) or (end_time_epoch_s is not None)
+    next_packet_time_s: Optional[float] = None
 
     def emit_samples(samples: np.ndarray, out_f) -> None:
         nonlocal out_buffer, data_packets_written, total_out_samples
@@ -816,8 +873,11 @@ def convert_v49_ddc(
 
             if isinstance(pkt, ContextPacket):
                 context_packets_seen += 1
+                context_time_s = _packet_time_s(pkt.integer_seconds, pkt.fractional_seconds)
                 if first_context_time_s is None:
-                    first_context_time_s = _packet_time_s(pkt.integer_seconds, pkt.fractional_seconds)
+                    first_context_time_s = context_time_s
+                if next_packet_time_s is None and context_time_s is not None:
+                    next_packet_time_s = context_time_s
                 if pkt.cif0 is not None:
                     cif0 = pkt.cif0
                     if input_payload_format is None and cif0.payload_format is not None:
@@ -862,6 +922,35 @@ def convert_v49_ddc(
                         "Supported: F32_IQ, S32_IQ, S24_IQ, S16_IQ"
                     )
 
+                packet_start_time_s = _packet_time_s(pkt.integer_seconds, pkt.fractional_seconds)
+                if packet_start_time_s is None and time_window_enabled:
+                    packet_start_time_s = next_packet_time_s
+                    if packet_start_time_s is None:
+                        packet_start_time_s = first_context_time_s
+                    if packet_start_time_s is None:
+                        raise ValueError(
+                            "Time slicing requires packet or context timestamps in the input stream"
+                        )
+
+                if time_window_enabled:
+                    packet_n_samples = _packet_sample_count(pkt.payload, input_payload_format)
+                    packet_end_time_s = packet_start_time_s + (
+                        float(packet_n_samples) / float(input_sample_rate_hz)
+                    )
+                    next_packet_time_s = packet_end_time_s
+                    if (
+                        start_time_epoch_s is not None
+                        and packet_end_time_s <= float(start_time_epoch_s)
+                    ):
+                        skipped_packets += 1
+                        continue
+                    if (
+                        end_time_epoch_s is not None
+                        and packet_start_time_s >= float(end_time_epoch_s)
+                    ):
+                        skipped_packets += 1
+                        break
+
                 if runtime_stage_chain is None:
                     decimator_path = _get_decimator_path(
                         decimator_paths,
@@ -894,7 +983,7 @@ def convert_v49_ddc(
                         input_stream_id = pkt.stream_id
                     if input_stream_id is None:
                         raise ValueError("Input stream_id is missing; cannot write output stream")
-                    start_time_s = _packet_time_s(pkt.integer_seconds, pkt.fractional_seconds)
+                    start_time_s = packet_start_time_s
                     if start_time_s is None:
                         start_time_s = first_context_time_s
                     writer = IQStreamWriter(
@@ -1026,6 +1115,16 @@ def main(argv: Optional[list[str]] = None) -> int:
             center_frequency_offset_hz=(
                 float(args.center_frequency_offset_hz)
                 if args.center_frequency_offset_hz is not None
+                else None
+            ),
+            start_time_epoch_s=(
+                _parse_iso_utc_time(args.start_time, option_name="--start-time")
+                if args.start_time is not None
+                else None
+            ),
+            end_time_epoch_s=(
+                _parse_iso_utc_time(args.end_time, option_name="--end-time")
+                if args.end_time is not None
                 else None
             ),
             config_path=Path(args.config).expanduser() if args.config else None,

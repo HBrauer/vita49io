@@ -1,0 +1,44 @@
+[scenario]
+sample_rate_hz = 98304000
+bandwidth_hz = 80000000
+rf_reference_frequency_hz = 915000000
+duration_seconds = 0.10
+output_format = "S16_IQ"
+seed = 1337
+center_frequency_offset_hz = 24000
+max_abs = 0.85
+
+[scenario.noise]
+amplitude = 0.02
+
+[scenario.tone]
+frequency_hz = 24000
+amplitude = 0.20
+
+[scenario.am]
+carrier_frequency_hz = 27000
+amplitude = 0.20
+modulation_frequency_hz = 500
+modulation_index = 0.70
+
+[scenario.fsk]
+mark_frequency_hz = 22500
+space_frequency_hz = 21500
+symbol_rate_hz = 500
+amplitude = 0.18
+seed = 2026
+
+[[scenario.blockers]]
+frequency_hz = 400000
+amplitude = 0.15
+
+[[scenario.blockers]]
+frequency_hz = -550000
+amplitude = 0.15
+
+[thresholds]
+tone_freq_tolerance_hz = 180.0
+am_min_correlation = 0.45
+fsk_max_ber = 0.20
+max_blocker_db_relative_to_tone = -28.0
+max_unwanted_db_relative_to_tone = -35.0
