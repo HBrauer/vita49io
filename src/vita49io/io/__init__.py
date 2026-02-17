@@ -19,8 +19,15 @@ Examples:
 """
 
 from .iq_writer import IQStreamWriter
-from .packet_reader import PacketReader, Readable
-from .payload_codec import payload_as_numpy, payload_from_numpy, payload_as_numpy_view
+from .frequency import StreamingFrequencyShifter
+from .packet_reader import PacketReader, RawDataPacket, Readable
+from .payload_codec import (
+    PayloadDecoder,
+    build_payload_decoder,
+    payload_as_numpy,
+    payload_from_numpy,
+    payload_as_numpy_view,
+)
 from .spectrum_processor import SpectrumStreamProcessor
 from .time_utils import (
     epoch_time_to_vita_timestamp,
@@ -30,8 +37,12 @@ from .time_utils import (
 
 __all__ = [
     "IQStreamWriter",
+    "StreamingFrequencyShifter",
     "PacketReader",
+    "RawDataPacket",
     "Readable",
+    "PayloadDecoder",
+    "build_payload_decoder",
     "payload_as_numpy",
     "payload_from_numpy",
     "payload_as_numpy_view",

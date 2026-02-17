@@ -2,11 +2,35 @@
 
 from __future__ import annotations
 
-from typing import Tuple, Union
+from functools import lru_cache
+from typing import Callable, Tuple, Union
 
 import numpy as np
 
 from ..protocol.cif0 import PayloadFormat, PackingMethod, SampleType, DataItemFormat
+
+PayloadDecoder = Callable[[Union[bytes, memoryview]], "np.ndarray"]
+
+
+def _decoder_key(
+    pf: PayloadFormat,
+    *,
+    validate_strict: bool,
+) -> Tuple[int, ...]:
+    return (
+        int(pf.packing_method),
+        int(pf.sample_type),
+        int(pf.sample_component_repeat),
+        int(pf.event_tag_size_bits),
+        int(pf.channel_tag_size_bits),
+        int(pf.data_item_fraction_size_bits),
+        int(pf.item_packing_field_size_bits),
+        int(pf.data_item_size_bits),
+        int(pf.repeat_count),
+        int(pf.vector_size),
+        int(pf.data_item_format),
+        int(validate_strict),
+    )
 
 
 def _validate_supported(
@@ -72,8 +96,210 @@ def _validate_supported(
     return ipf, di, fmt
 
 
+@lru_cache(maxsize=64)
+def _build_decoder_from_key(key: Tuple[int, ...]) -> PayloadDecoder:
+    (
+        packing_method,
+        sample_type_raw,
+        sample_component_repeat,
+        event_tag_size_bits,
+        channel_tag_size_bits,
+        data_item_fraction_size_bits,
+        ipf,
+        di,
+        repeat_count,
+        vector_size,
+        fmt_raw,
+        validate_strict_raw,
+    ) = key
+
+    # Recreate payload format shape for a single validation pass while building.
+    pf = PayloadFormat(
+        packing_method=PackingMethod(packing_method),
+        sample_type=SampleType(sample_type_raw),
+        sample_component_repeat=bool(sample_component_repeat),
+        event_tag_size_bits=int(event_tag_size_bits),
+        channel_tag_size_bits=int(channel_tag_size_bits),
+        data_item_fraction_size_bits=int(data_item_fraction_size_bits),
+        item_packing_field_size_bits=int(ipf),
+        data_item_size_bits=int(di),
+        repeat_count=int(repeat_count),
+        vector_size=int(vector_size),
+        data_item_format=DataItemFormat(fmt_raw),
+    )
+    ipf, di, fmt = _validate_supported(
+        pf, validate_strict=bool(validate_strict_raw)
+    )
+    sample_type = pf.sample_type
+
+    if ipf == 32 and di == 32 and fmt == DataItemFormat.IEEE754_SINGLE:
+        if sample_type == SampleType.REAL:
+            def decode_real_f32(payload: Union[bytes, memoryview]) -> "np.ndarray":
+                return np.frombuffer(payload, dtype=">f4").astype(np.float32)
+
+            return decode_real_f32
+
+        def decode_cx_f32(payload: Union[bytes, memoryview]) -> "np.ndarray":
+            floats = np.frombuffer(payload, dtype=">f4")
+            if floats.size % 2 != 0:
+                raise ValueError("Payload does not contain an even number of components for I/Q")
+            return floats.astype(np.float32).view(np.complex64)
+
+        return decode_cx_f32
+
+    if ipf == 16 and di == 16 and fmt == DataItemFormat.SIGNED_FIXED_POINT:
+        scale = np.float32(1.0 / float(1 << 15))
+
+        if sample_type == SampleType.REAL:
+            def decode_real_s16(payload: Union[bytes, memoryview]) -> "np.ndarray":
+                vals = np.frombuffer(payload, dtype=">i2").astype(np.float32)
+                vals *= scale
+                return vals
+
+            return decode_real_s16
+
+        def decode_cx_s16(payload: Union[bytes, memoryview]) -> "np.ndarray":
+            vals = np.frombuffer(payload, dtype=">i2").astype(np.float32)
+            if vals.size % 2 != 0:
+                raise ValueError("Payload does not contain an even number of components for I/Q")
+            vals *= scale
+            return vals.view(np.complex64)
+
+        return decode_cx_s16
+
+    if ipf == 16 and di == 16 and fmt == DataItemFormat.UNSIGNED_FIXED_POINT:
+        scale = np.float32(1.0 / float(1 << 16))
+
+        if sample_type == SampleType.REAL:
+            def decode_real_u16(payload: Union[bytes, memoryview]) -> "np.ndarray":
+                vals = np.frombuffer(payload, dtype=">u2").astype(np.float32)
+                vals *= scale
+                return vals
+
+            return decode_real_u16
+
+        def decode_cx_u16(payload: Union[bytes, memoryview]) -> "np.ndarray":
+            vals = np.frombuffer(payload, dtype=">u2").astype(np.float32)
+            if vals.size % 2 != 0:
+                raise ValueError("Payload does not contain an even number of components for I/Q")
+            vals *= scale
+            return vals.view(np.complex64)
+
+        return decode_cx_u16
+
+    if ipf == 32 and di == 32 and fmt == DataItemFormat.SIGNED_FIXED_POINT:
+        scale = np.float32(1.0 / float(1 << 31))
+
+        if sample_type == SampleType.REAL:
+            def decode_real_s32(payload: Union[bytes, memoryview]) -> "np.ndarray":
+                vals = np.frombuffer(payload, dtype=">i4").astype(np.float32)
+                vals *= scale
+                return vals
+
+            return decode_real_s32
+
+        def decode_cx_s32(payload: Union[bytes, memoryview]) -> "np.ndarray":
+            vals = np.frombuffer(payload, dtype=">i4").astype(np.float32)
+            vals *= scale
+            if vals.size % 2 != 0:
+                raise ValueError("Payload does not contain an even number of components for I/Q")
+            return vals.view(np.complex64)
+
+        return decode_cx_s32
+
+    if ipf == 32 and di == 32 and fmt == DataItemFormat.UNSIGNED_FIXED_POINT:
+        scale = np.float32(1.0 / float(1 << 32))
+
+        if sample_type == SampleType.REAL:
+            def decode_real_u32(payload: Union[bytes, memoryview]) -> "np.ndarray":
+                vals = np.frombuffer(payload, dtype=">u4").astype(np.float32)
+                vals *= scale
+                return vals
+
+            return decode_real_u32
+
+        def decode_cx_u32(payload: Union[bytes, memoryview]) -> "np.ndarray":
+            vals = np.frombuffer(payload, dtype=">u4").astype(np.float32)
+            vals *= scale
+            if vals.size % 2 != 0:
+                raise ValueError("Payload does not contain an even number of components for I/Q")
+            return vals.view(np.complex64)
+
+        return decode_cx_u32
+
+    # Generic fallback for less-common packed formats.
+    if ipf == 16:
+        def _fields(payload: Union[bytes, memoryview]) -> "np.ndarray":
+            return np.frombuffer(payload, dtype=">u2").astype(np.uint32)
+    else:
+        def _fields(payload: Union[bytes, memoryview]) -> "np.ndarray":
+            return np.frombuffer(payload, dtype=">u4")
+
+    if fmt == DataItemFormat.SIGNED_FIXED_POINT:
+        scale = np.float32(float(1 << (di - 1)))
+
+        if sample_type == SampleType.REAL:
+            def decode_real_generic_signed(payload: Union[bytes, memoryview]) -> "np.ndarray":
+                uvals = _fields(payload)
+                if di < 32:
+                    uvals = (uvals & ((1 << di) - 1)).astype(np.uint32, copy=False)
+                    s = (uvals.astype(np.int32) << (32 - di)) >> (32 - di)
+                else:
+                    s = uvals.astype(np.int32)
+                return (s.astype(np.float32) / scale).astype(np.float32)
+
+            return decode_real_generic_signed
+
+        def decode_cx_generic_signed(payload: Union[bytes, memoryview]) -> "np.ndarray":
+            uvals = _fields(payload)
+            if di < 32:
+                uvals = (uvals & ((1 << di) - 1)).astype(np.uint32, copy=False)
+                s = (uvals.astype(np.int32) << (32 - di)) >> (32 - di)
+            else:
+                s = uvals.astype(np.int32)
+            vals = (s.astype(np.float32) / scale).astype(np.float32)
+            if vals.size % 2 != 0:
+                raise ValueError("Payload does not contain an even number of components for I/Q")
+            return vals.view(np.complex64)
+
+        return decode_cx_generic_signed
+
+    # UNSIGNED_FIXED_POINT generic
+    scale = np.float32(float(1 << di))
+
+    if sample_type == SampleType.REAL:
+        def decode_real_generic_unsigned(payload: Union[bytes, memoryview]) -> "np.ndarray":
+            uvals = _fields(payload)
+            if di < 32:
+                uvals = (uvals & ((1 << di) - 1)).astype(np.uint32, copy=False)
+            return (uvals.astype(np.float32) / scale).astype(np.float32)
+
+        return decode_real_generic_unsigned
+
+    def decode_cx_generic_unsigned(payload: Union[bytes, memoryview]) -> "np.ndarray":
+        uvals = _fields(payload)
+        if di < 32:
+            uvals = (uvals & ((1 << di) - 1)).astype(np.uint32, copy=False)
+        vals = (uvals.astype(np.float32) / scale).astype(np.float32)
+        if vals.size % 2 != 0:
+            raise ValueError("Payload does not contain an even number of components for I/Q")
+        return vals.view(np.complex64)
+
+    return decode_cx_generic_unsigned
+
+
+def build_payload_decoder(
+    pf: PayloadFormat,
+    *,
+    validate_strict: bool = False,
+) -> PayloadDecoder:
+    """Build and return a payload decoder specialized for a single format."""
+    key = _decoder_key(pf, validate_strict=validate_strict)
+    return _build_decoder_from_key(key)
+
+
 def payload_as_numpy(
-    payload: bytes,
+    payload: Union[bytes, memoryview],
     pf: PayloadFormat,
     *,
     validate_strict: bool = False,
@@ -81,7 +307,7 @@ def payload_as_numpy(
     """Decode payload bytes into complex64 NumPy samples.
 
     Args:
-        payload: Raw payload bytes in on-wire big-endian ordering.
+        payload: Raw payload bytes/memoryview in on-wire big-endian ordering.
         pf: Payload format describing how to interpret the payload.
         validate_strict: When True, enforce vector/repeat constraints.
 
@@ -101,70 +327,8 @@ def payload_as_numpy(
             - Unsigned fixed-point (16/24/32-bit items in 16/32-bit fields).
 
     """
-    ipf, di, fmt = _validate_supported(pf, validate_strict=validate_strict)
-
-    sample_type = pf.sample_type
-
-    # Fast paths for common full-width cases
-    if ipf == 32 and di == 32:
-        if fmt == DataItemFormat.IEEE754_SINGLE:
-            floats = np.frombuffer(payload, dtype=">f4")
-            if sample_type == SampleType.REAL:
-                return floats.astype(np.float32)
-            if floats.size % 2 != 0:
-                raise ValueError("Payload does not contain an even number of components for I/Q")
-            iq = floats.reshape(-1, 2).astype(np.float32)
-            return (iq[:, 0] + 1j * iq[:, 1]).astype(np.complex64)
-        if fmt == DataItemFormat.SIGNED_FIXED_POINT:
-            s32 = np.frombuffer(payload, dtype=">i4")
-            # Use float64 for arithmetic, then cast to float32 to avoid precision loss
-            vals = (s32.astype(np.float64) / float(1 << 31)).astype(np.float32)
-        else:  # UNSIGNED_FIXED_POINT
-            u32 = np.frombuffer(payload, dtype=">u4")
-            # Use float64 for arithmetic, then cast to float32 to avoid precision loss
-            vals = (u32.astype(np.float64) / float(1 << 32)).astype(np.float32)
-    elif ipf == 16 and di == 16:
-        if fmt == DataItemFormat.SIGNED_FIXED_POINT:
-            s16 = np.frombuffer(payload, dtype=">i2")
-            vals = (s16.astype(np.float32) / float(1 << 15)).astype(np.float32)
-        else:  # UNSIGNED_FIXED_POINT
-            u16 = np.frombuffer(payload, dtype=">u2")
-            vals = (u16.astype(np.float32) / float(1 << 16)).astype(np.float32)
-    else:
-        # Generic paths: extract fields as big-endian and unpack lower di bits
-        if ipf == 16:
-            fields = np.frombuffer(payload, dtype=">u2")
-            uvals = fields.astype(np.uint32)
-        else:  # ipf == 32
-            fields32 = np.frombuffer(payload, dtype=">u4")
-            uvals = fields32
-
-        if di < 32:
-            mask = (1 << di) - 1
-            uvals = (uvals & mask).astype(np.uint32, copy=False)
-
-        if fmt == DataItemFormat.SIGNED_FIXED_POINT:
-            # Sign-extend using arithmetic shifts for speed
-            if di < 32:
-                s = (uvals.astype(np.int32) << (32 - di)) >> (32 - di)
-            else:
-                s = uvals.astype(np.int32)
-            scale = float(1 << (di - 1))
-            vals = (s.astype(np.float32) / scale).astype(np.float32)
-        elif fmt == DataItemFormat.UNSIGNED_FIXED_POINT:
-            scale = float(1 << di)
-            vals = (uvals.astype(np.float32) / scale).astype(np.float32)
-        else:
-            raise ValueError(f"Internal error: unexpected format in fixed-point decoder: {pf}")
-
-    if sample_type == SampleType.REAL:
-        return vals.astype(np.float32)
-
-    # Convert interleaved I/Q components to complex samples.
-    if vals.size % 2 != 0:
-        raise ValueError("Payload does not contain an even number of components for I/Q")
-    vec = vals.reshape(-1, 2)
-    return (vec[:, 0] + 1j * vec[:, 1]).astype(np.complex64)
+    decoder = build_payload_decoder(pf, validate_strict=validate_strict)
+    return decoder(payload)
 
 
 def payload_as_numpy_view(
@@ -349,4 +513,10 @@ def payload_from_numpy(
     return fields32.astype(">u4").tobytes()
 
 
-__all__ = ["payload_as_numpy", "payload_from_numpy", "payload_as_numpy_view"]
+__all__ = [
+    "PayloadDecoder",
+    "build_payload_decoder",
+    "payload_as_numpy",
+    "payload_from_numpy",
+    "payload_as_numpy_view",
+]

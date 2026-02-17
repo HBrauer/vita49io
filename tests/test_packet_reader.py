@@ -2,7 +2,7 @@ import io
 import unittest
 
 from vita49io import CIF0Fields, ContextPacket, DataPacket, PacketType, TSI, TSF
-from vita49io.io.packet_reader import PacketReader
+from vita49io.io.packet_reader import PacketReader, RawDataPacket
 
 
 def _data_packet(stream_id: int, payload: bytes = b"\x00") -> bytes:
@@ -29,6 +29,39 @@ def _context_packet(stream_id: int) -> bytes:
 
 
 class TestPacketReader(unittest.TestCase):
+    def test_read_packet_fast_data_packet(self) -> None:
+        stream = io.BytesIO(_data_packet(0x12345678, payload=b"\x11\x22\x33\x44"))
+        reader = PacketReader(stream)
+        pkt = reader.read_packet_fast()
+        self.assertIsInstance(pkt, RawDataPacket)
+        assert isinstance(pkt, RawDataPacket)
+        self.assertEqual(pkt.packet_type, int(PacketType.IF_DATA_WITH_STREAM_ID))
+        self.assertEqual(pkt.stream_id, 0x12345678)
+        self.assertEqual(bytes(pkt.payload), b"\x11\x22\x33\x44")
+
+    def test_read_packet_fast_context_packet(self) -> None:
+        stream = io.BytesIO(_context_packet(0xCAFEBABE))
+        reader = PacketReader(stream)
+        pkt = reader.read_packet_fast()
+        self.assertIsInstance(pkt, ContextPacket)
+        assert isinstance(pkt, ContextPacket)
+        self.assertEqual(pkt.stream_id, 0xCAFEBABE)
+
+    def test_read_packet_fast_context_then_data(self) -> None:
+        stream = io.BytesIO(
+            _context_packet(7) + _data_packet(7, payload=b"\xAA\xBB\xCC\xDD")
+        )
+        reader = PacketReader(stream)
+
+        first = reader.read_packet_fast()
+        second = reader.read_packet_fast()
+
+        self.assertIsInstance(first, ContextPacket)
+        self.assertIsInstance(second, RawDataPacket)
+        assert isinstance(second, RawDataPacket)
+        self.assertEqual(second.stream_id, 7)
+        self.assertEqual(bytes(second.payload), b"\xAA\xBB\xCC\xDD")
+
     def test_skip_packets(self) -> None:
         stream = io.BytesIO(
             _data_packet(1)

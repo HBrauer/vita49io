@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 
 from vita49io.io.payload_codec import (
+    build_payload_decoder,
     payload_as_numpy,
     payload_as_numpy_view,
     payload_from_numpy,
@@ -38,6 +39,38 @@ def _make_pf(
 
 
 class TestPayloadCodec(unittest.TestCase):
+    def test_build_payload_decoder_reuse_and_memoryview(self) -> None:
+        pf = _make_pf(
+            sample_type=SampleType.COMPLEX_CARTESIAN,
+            data_item_format=DataItemFormat.SIGNED_FIXED_POINT,
+            item_packing_field_size_bits=16,
+            data_item_size_bits=16,
+        )
+        samples = np.array([0.25 - 0.125j, -0.5 + 0.75j], dtype=np.complex64)
+        payload = payload_from_numpy(samples, pf)
+
+        decoder1 = build_payload_decoder(pf)
+        decoder2 = build_payload_decoder(pf)
+        self.assertIs(decoder1, decoder2)
+
+        decoded_fast = decoder1(memoryview(payload))
+        decoded_ref = payload_as_numpy(payload, pf)
+        self.assertEqual(decoded_fast.dtype, np.dtype(np.complex64))
+        np.testing.assert_allclose(decoded_fast, decoded_ref, atol=1e-6)
+
+    def test_real_s32_decodes_to_float32(self) -> None:
+        pf = _make_pf(
+            sample_type=SampleType.REAL,
+            data_item_format=DataItemFormat.SIGNED_FIXED_POINT,
+            item_packing_field_size_bits=32,
+            data_item_size_bits=32,
+        )
+        samples = np.array([0.0, 0.5, -0.5], dtype=np.float32)
+        payload = payload_from_numpy(samples, pf)
+        decoded = payload_as_numpy(payload, pf)
+        self.assertEqual(decoded.dtype, np.dtype(np.float32))
+        np.testing.assert_allclose(decoded, samples, atol=1e-6)
+
     def test_complex_float32_roundtrip(self) -> None:
         pf = _make_pf(
             sample_type=SampleType.COMPLEX_CARTESIAN,

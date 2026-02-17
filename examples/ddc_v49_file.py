@@ -12,12 +12,21 @@ import numpy as np
 from scipy.signal import upfirdn
 from scipy.signal._upfirdn import _output_len as _upfirdn_output_len
 
+# Allow running the example from the repo root without installation.
+_EXAMPLE_DIR = Path(__file__).resolve().parent
+_SRC_DIR = _EXAMPLE_DIR.parent / "src"
+if _SRC_DIR.is_dir():
+    _src_str = str(_SRC_DIR)
+    if _src_str not in sys.path:
+        sys.path.insert(0, _src_str)
+
 from vita49io.defaults.default_payload_formats import DefaultPayloadFormats
+from vita49io.io.frequency import StreamingFrequencyShifter
 from vita49io.io.iq_writer import IQStreamWriter
-from vita49io.io.packet_reader import PacketReader
-from vita49io.io.payload_codec import payload_as_numpy
+from vita49io.io.packet_reader import PacketReader, RawDataPacket
+from vita49io.io.payload_codec import build_payload_decoder
 from vita49io.protocol.context_packet import ContextPacket
-from vita49io.protocol.data_packet import DataPacket
+from vita49io.protocol.enums import PacketType, TSI, TSF
 
 DEFAULT_DECIMATOR_CONFIG_PATH = Path(__file__).with_name("ddc_v49_file.toml")
 
@@ -243,29 +252,6 @@ class StreamingResampler:
             _upfirdn_output_len(self._h_len, self._n_seen, self.up, self.down)
         )
         return self._emit_polyphase_until(total_outputs)
-
-
-class StreamingFrequencyShifter:
-    def __init__(self, sample_rate_hz: float, frequency_offset_hz: float):
-        if sample_rate_hz <= 0:
-            raise ValueError("sample_rate_hz must be > 0")
-        self.sample_rate_hz = float(sample_rate_hz)
-        self.frequency_offset_hz = float(frequency_offset_hz)
-        self._phase = 0.0
-        self._phase_step = -2.0 * np.pi * self.frequency_offset_hz / self.sample_rate_hz
-
-    def process(self, samples: np.ndarray) -> np.ndarray:
-        x = np.asarray(samples, dtype=np.complex64).reshape(-1)
-        if x.size == 0 or self.frequency_offset_hz == 0.0:
-            return x
-
-        n = np.arange(x.size, dtype=np.float64)
-        osc = np.exp(1j * (self._phase + self._phase_step * n))
-        y = x * osc
-
-        self._phase += self._phase_step * x.size
-        self._phase = float(np.fmod(self._phase, 2.0 * np.pi))
-        return np.asarray(y, dtype=np.complex64)
 
 
 def _ensure_src_on_path() -> None:
@@ -791,6 +777,7 @@ def convert_v49_ddc(
 
     # Output stream state
     writer: Optional[IQStreamWriter] = None
+    payload_decoder = None
 
     in_chunks: list[np.ndarray] = []
     in_count = 0
@@ -822,7 +809,7 @@ def convert_v49_ddc(
     with input_path.open("rb") as f_in, output_path.open("wb") as f_out:
         reader = PacketReader(f_in)
         while True:
-            pkt = reader.read_packet()
+            pkt = reader.read_packet_fast()
             if pkt is None:
                 break
 
@@ -863,7 +850,7 @@ def convert_v49_ddc(
                 input_context_tsm = bool(pkt.header.indicators_24)
                 continue
 
-            if isinstance(pkt, DataPacket):
+            if isinstance(pkt, RawDataPacket):
                 data_packets_seen += 1
                 if input_payload_format is None or input_sample_rate_hz is None:
                     skipped_packets += 1
@@ -913,12 +900,12 @@ def convert_v49_ddc(
                         stream_id=input_stream_id,
                         sample_rate_hz=float(output_sample_rate_hz),
                         payload_format=output_payload_format,
-                        data_packet_type=pkt.header.packet_type,
-                        tsi=pkt.header.tsi,
-                        tsf=pkt.header.tsf,
+                        data_packet_type=PacketType(pkt.packet_type),
+                        tsi=TSI(pkt.tsi),
+                        tsf=TSF(pkt.tsf),
                         class_id=pkt.class_id,
-                        requires_vita49_2=bool(pkt.header.indicators_25),
-                        frequency_domain=bool(pkt.header.indicators_24),
+                        requires_vita49_2=bool(pkt.indicators_25),
+                        frequency_domain=bool(pkt.indicators_24),
                         start_time_epoch_s=start_time_s,
                         bandwidth_hz=float(output_bandwidth_hz),
                         rf_reference_frequency_hz=output_rf_reference_frequency_hz,
@@ -933,9 +920,9 @@ def convert_v49_ddc(
                     )
                     f_out.write(writer.build_context_packet().to_bytes())
 
-                payload = pkt.payload
-                payload_bytes = payload.tobytes() if isinstance(payload, memoryview) else payload
-                iq = payload_as_numpy(payload_bytes, input_payload_format)
+                if payload_decoder is None:
+                    payload_decoder = build_payload_decoder(input_payload_format)
+                iq = payload_decoder(pkt.payload)
 
                 in_chunks.append(iq)
                 in_count += int(iq.size)
