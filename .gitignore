@@ -11,3 +11,7 @@ dist/
 *.v49
 *.pcap
 .env
+*.sigmf-data
+*.sigmf-meta
+artifacts/
+*.prof
