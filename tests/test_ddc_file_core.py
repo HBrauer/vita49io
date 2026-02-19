@@ -124,6 +124,55 @@ class TestDDCFileCore(unittest.TestCase):
             self.assertEqual(summary["output_sample_rate_hz"], fs_out)
             self.assertGreater(summary["output_samples"], 0)
 
+    def test_bandwidth_selects_output_rate(self) -> None:
+        fs_in = 384_000.0
+        fs_out = 256_000
+        n_samples = 38_400
+        t = np.arange(n_samples, dtype=np.float64) / fs_in
+        iq = (0.5 * np.exp(1j * 2.0 * np.pi * 10_000.0 * t)).astype(np.complex64)
+
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            in_path = td_path / "in.v49"
+            out_path = td_path / "out.v49"
+            config_path = td_path / "bandwidth_select.toml"
+            _write_input_v49(in_path, fs_in=fs_in, iq=iq)
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "[[decimator.paths]]",
+                        "input_sample_rate = 384000",
+                        "output_sample_rate = 256000",
+                        "bandwidth = 200000",
+                        "taps = [0.05, 0.25, 0.4, 0.25, 0.05]",
+                        "",
+                        "[[decimator.paths]]",
+                        "input_sample_rate = 384000",
+                        "output_sample_rate = 128000",
+                        "bandwidth = 100000",
+                        "taps = [0.05, 0.25, 0.4, 0.25, 0.05]",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            summary = convert_v49_ddc(
+                input_path=in_path,
+                output_path=out_path,
+                output_format_name="S16_IQ",
+                output_sample_rate_hz=None,
+                target_bandwidth_hz=200_000,
+                chunk_samples=4096,
+                samples_per_packet=1024,
+                config_path=config_path,
+                center_frequency_offset_hz=0.0,
+            )
+
+            self.assertEqual(summary["output_sample_rate_hz"], fs_out)
+            self.assertEqual(summary["output_bandwidth_hz"], 200_000)
+            self.assertGreater(summary["output_samples"], 0)
+
     def test_time_window_overlap_keeps_only_overlapping_packets(self) -> None:
         fs_in = 1_000.0
         fs_out = 500

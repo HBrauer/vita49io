@@ -280,6 +280,10 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
             "    --output-format S16_IQ \\\n"
             "    --output-sample-rate 2048000\n"
             "\n"
+            "  python examples/ddc_v49_file.py in.v49 out_bw.v49 \\\n"
+            "    --output-format S16_IQ \\\n"
+            "    --bandwidth 10000000\n"
+            "\n"
             "  python examples/ddc_v49_file.py in.v49 out_shifted.v49 \\\n"
             "    --output-format F32_IQ \\\n"
             "    --output-sample-rate 1024000 \\\n"
@@ -301,11 +305,16 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         required=True,
         help="Output payload format (F32_IQ, S32_IQ, S24_IQ, S16_IQ)",
     )
-    parser.add_argument(
+    output_selector_group = parser.add_mutually_exclusive_group(required=True)
+    output_selector_group.add_argument(
         "--output-sample-rate",
-        required=True,
         type=int,
         help="Output sample rate in Hz",
+    )
+    output_selector_group.add_argument(
+        "--bandwidth",
+        type=int,
+        help="Select output path by configured output bandwidth in Hz",
     )
     tuning_group = parser.add_mutually_exclusive_group()
     tuning_group.add_argument(
@@ -619,6 +628,63 @@ def _get_decimator_path(
     )
 
 
+def _get_decimator_path_for_request(
+    decimator_paths: Dict[Tuple[int, int], DecimatorPath],
+    input_sample_rate_hz: int,
+    output_sample_rate_hz: Optional[int],
+    target_bandwidth_hz: Optional[int],
+) -> tuple[DecimatorPath, int]:
+    if output_sample_rate_hz is None and target_bandwidth_hz is None:
+        raise ValueError("Specify output_sample_rate_hz or target_bandwidth_hz")
+    if output_sample_rate_hz is not None and target_bandwidth_hz is not None:
+        raise ValueError("Specify only one of output_sample_rate_hz or target_bandwidth_hz")
+
+    if output_sample_rate_hz is not None:
+        path = _get_decimator_path(
+            decimator_paths,
+            input_sample_rate_hz,
+            int(output_sample_rate_hz),
+        )
+        return path, int(output_sample_rate_hz)
+
+    assert target_bandwidth_hz is not None
+    matches: list[tuple[int, DecimatorPath]] = [
+        (out_rate, path)
+        for (in_rate, out_rate), path in decimator_paths.items()
+        if in_rate == input_sample_rate_hz and path.bandwidth_hz == int(target_bandwidth_hz)
+    ]
+    if not matches:
+        configured_bandwidths = sorted(
+            {
+                path.bandwidth_hz
+                for (in_rate, _), path in decimator_paths.items()
+                if in_rate == input_sample_rate_hz
+            }
+        )
+        if not configured_bandwidths:
+            configured_inputs = sorted({in_rate for in_rate, _ in decimator_paths})
+            raise ValueError(
+                f"Unsupported input sample rate {input_sample_rate_hz}. "
+                "Configured inputs: "
+                + ", ".join(str(x) for x in configured_inputs)
+            )
+        raise ValueError(
+            f"Unsupported bandwidth {target_bandwidth_hz} for input {input_sample_rate_hz}. "
+            "Configured bandwidths for this input: "
+            + ", ".join(str(x) for x in configured_bandwidths)
+        )
+    if len(matches) > 1:
+        matching_output_rates = sorted({out_rate for out_rate, _ in matches})
+        raise ValueError(
+            f"Ambiguous bandwidth {target_bandwidth_hz} for input {input_sample_rate_hz}. "
+            "Matching output sample rates: "
+            + ", ".join(str(x) for x in matching_output_rates)
+            + ". Specify --output-sample-rate."
+        )
+
+    return matches[0][1], int(matches[0][0])
+
+
 def _build_runtime_stage_chain(decimator_path: DecimatorPath) -> list[RuntimeDecimatorStage]:
     runtime_stages: list[RuntimeDecimatorStage] = []
     for idx, stage_cfg in enumerate(decimator_path.stages, start=1):
@@ -756,10 +822,11 @@ def convert_v49_ddc(
     input_path: Path,
     output_path: Path,
     output_format_name: str,
-    output_sample_rate_hz: int,
+    output_sample_rate_hz: Optional[int],
     chunk_samples: int,
     samples_per_packet: int,
     config_path: Optional[Path] = None,
+    target_bandwidth_hz: Optional[int] = None,
     center_frequency_hz: Optional[float] = None,
     center_frequency_offset_hz: Optional[float] = None,
     start_time_epoch_s: Optional[float] = None,
@@ -783,12 +850,17 @@ def convert_v49_ddc(
         )
     output_payload_format = supported_formats[output_format_name]
 
-    configured_output_rates = sorted({out_rate for _, out_rate in decimator_paths})
-    if output_sample_rate_hz not in configured_output_rates:
-        raise ValueError(
-            "Unsupported output sample rate. Configured outputs: "
-            + ", ".join(str(x) for x in configured_output_rates)
-        )
+    if output_sample_rate_hz is None and target_bandwidth_hz is None:
+        raise ValueError("Specify output_sample_rate_hz or target_bandwidth_hz")
+    if output_sample_rate_hz is not None and target_bandwidth_hz is not None:
+        raise ValueError("Specify only one of output_sample_rate_hz or target_bandwidth_hz")
+    if output_sample_rate_hz is not None:
+        configured_output_rates = sorted({out_rate for _, out_rate in decimator_paths})
+        if int(output_sample_rate_hz) not in configured_output_rates:
+            raise ValueError(
+                "Unsupported output sample rate. Configured outputs: "
+                + ", ".join(str(x) for x in configured_output_rates)
+            )
 
     if chunk_samples <= 0:
         raise ValueError("chunk_samples must be > 0")
@@ -846,6 +918,9 @@ def convert_v49_ddc(
     context_packets_seen = 0
     skipped_packets = 0
     output_bandwidth_hz: Optional[int] = None
+    selected_output_sample_rate_hz: Optional[int] = (
+        int(output_sample_rate_hz) if output_sample_rate_hz is not None else None
+    )
     time_window_enabled = (start_time_epoch_s is not None) or (end_time_epoch_s is not None)
     next_packet_time_s: Optional[float] = None
 
@@ -952,10 +1027,11 @@ def convert_v49_ddc(
                         break
 
                 if runtime_stage_chain is None:
-                    decimator_path = _get_decimator_path(
+                    decimator_path, selected_output_sample_rate_hz = _get_decimator_path_for_request(
                         decimator_paths,
                         input_sample_rate_hz,
-                        output_sample_rate_hz,
+                        selected_output_sample_rate_hz,
+                        target_bandwidth_hz,
                     )
                     output_bandwidth_hz = decimator_path.bandwidth_hz
                     (
@@ -988,7 +1064,7 @@ def convert_v49_ddc(
                         start_time_s = first_context_time_s
                     writer = IQStreamWriter(
                         stream_id=input_stream_id,
-                        sample_rate_hz=float(output_sample_rate_hz),
+                        sample_rate_hz=float(selected_output_sample_rate_hz),
                         payload_format=output_payload_format,
                         data_packet_type=PacketType(pkt.packet_type),
                         tsi=TSI(pkt.tsi),
@@ -1037,10 +1113,11 @@ def convert_v49_ddc(
         if in_count > 0 and input_sample_rate_hz is not None and input_payload_format is not None:
             combined = np.concatenate(in_chunks) if len(in_chunks) > 1 else in_chunks[0]
             if runtime_stage_chain is None:
-                decimator_path = _get_decimator_path(
+                decimator_path, selected_output_sample_rate_hz = _get_decimator_path_for_request(
                     decimator_paths,
                     input_sample_rate_hz,
-                    output_sample_rate_hz,
+                    selected_output_sample_rate_hz,
+                    target_bandwidth_hz,
                 )
                 output_bandwidth_hz = decimator_path.bandwidth_hz
                 (
@@ -1088,7 +1165,7 @@ def convert_v49_ddc(
         "context_packets_seen": context_packets_seen,
         "skipped_packets": skipped_packets,
         "input_sample_rate_hz": int(input_sample_rate_hz or 0),
-        "output_sample_rate_hz": int(output_sample_rate_hz),
+        "output_sample_rate_hz": int(selected_output_sample_rate_hz or 0),
         "input_payload_format": input_payload_name or "",
         "output_payload_format": output_format_name,
         "output_bandwidth_hz": int(output_bandwidth_hz or 0),
@@ -1104,7 +1181,16 @@ def main(argv: Optional[list[str]] = None) -> int:
             input_path=Path(args.input_file),
             output_path=Path(args.output_file),
             output_format_name=args.output_format,
-            output_sample_rate_hz=int(args.output_sample_rate),
+            output_sample_rate_hz=(
+                int(args.output_sample_rate)
+                if args.output_sample_rate is not None
+                else None
+            ),
+            target_bandwidth_hz=(
+                int(args.bandwidth)
+                if args.bandwidth is not None
+                else None
+            ),
             chunk_samples=int(args.chunk_samples),
             samples_per_packet=int(args.samples_per_packet),
             center_frequency_hz=(
