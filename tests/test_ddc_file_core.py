@@ -49,7 +49,7 @@ class TestDDCFileCore(unittest.TestCase):
         t = np.arange(n_samples, dtype=np.float64) / fs_in
         iq = (0.6 * np.exp(1j * 2.0 * np.pi * tone_hz * t)).astype(np.complex64)
 
-        config_path = Path(__file__).resolve().parents[1] / "examples" / "ddc_v49_file.toml"
+        config_path = Path(__file__).resolve().parents[1] / "scripts" / "ddc_v49_file.toml"
 
         with tempfile.TemporaryDirectory() as td:
             in_path = Path(td) / "in.v49"

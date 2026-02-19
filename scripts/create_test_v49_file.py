@@ -65,7 +65,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         epilog=textwrap.dedent(
             f"""\
             Examples:
-              python examples/create_test_v49_file.py test.v49 \\
+              python scripts/create_test_v49_file.py test.v49 \\
                 --sample-rate-hz 1000000 \\
                 --bandwidth-hz 200000 \\
                 --rf-reference-frequency-hz 915000000 \\
@@ -75,7 +75,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                 --noise-amplitude 0.02 \\
                 --output-format S16_IQ
 
-              python examples/create_test_v49_file.py test_packets.v49 \\
+              python scripts/create_test_v49_file.py test_packets.v49 \\
                 --sample-rate-hz 48000 \\
                 --bandwidth-hz 20000 \\
                 --rf-reference-frequency-hz 100000000 \\

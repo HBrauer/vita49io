@@ -195,7 +195,7 @@ Notes
 - For frequency-domain Signal Spectral Data, set header bit 24 (`indicators_24=True`) or use `IQStreamWriter(frequency_domain=True)` to raise the S-bit per AV49.2 Rule 6.3.1-2.
 - In `SpectrumProcessor`/`SpectrumStreamProcessor` continuous mode, omitting `hop_size` defaults it to `fft_size` (no overlap). In snapshot mode, one FFT is computed per output frame from the latest `fft_size` samples.
 - GNU Radio QT Frequency Sink-like snapshot example:
-  `python examples/spectrum_from_v49_file.py input.v49 --processing-mode snapshot --fft-size 1024 --output-fps 10 --averaging none --band-mode full --power-scale raw --window hann`
+  `python scripts/spectrum_from_v49_file.py input.v49 --processing-mode snapshot --fft-size 1024 --output-fps 10 --averaging none --band-mode full --power-scale raw --window hann`
 
 
 Read Packets From File
@@ -234,7 +234,7 @@ with open(path, "rb") as f:
                 handle(iq)
 ```
 
-See: `examples/read_v49_file.py`.
+See: `scripts/read_v49_file.py`.
 
 Write Data Into A File
 ---------------------------
@@ -270,17 +270,17 @@ open("out.v49", "wb").write(out)
 - Timestamps are emitted using `tsi`/`tsf` (defaults: `UTC` + `FRACTIONAL`).
 - To use fixed-point payloads, build a `PayloadFormat` and pass it to the writer via constructor fields; it propagates to context and data encoding.
 
-See: `examples/write_iq_stream_v49.py`.
+See: `scripts/write_iq_stream_v49.py`.
 
 
 Examples
 --------
 
-- `examples/read_v49_file.py`: parse and print packets from a file
-- `examples/write_frequency_domain_v49.py`: synthesize spectral bins and write context + spectral data packets (S-bit set)
-- `examples/write_iq_stream_v49.py`: synthesize a tone and write IQ packets
-- `examples/waterfall_v49_file.py`: visualize spectrogram
-- `examples/waterfall_frequency_domain_v49.py`: read spectral packets (S-bit) and display a waterfall
+- `scripts/read_v49_file.py`: parse and print packets from a file
+- `scripts/write_frequency_domain_v49.py`: synthesize spectral bins and write context + spectral data packets (S-bit set)
+- `scripts/write_iq_stream_v49.py`: synthesize a tone and write IQ packets
+- `scripts/waterfall_v49_file.py`: visualize spectrogram
+- `scripts/waterfall_frequency_domain_v49.py`: read spectral packets (S-bit) and display a waterfall
 
 License
 -------

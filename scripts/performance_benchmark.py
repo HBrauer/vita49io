@@ -1,7 +1,7 @@
 """Benchmark VITA 49 encode/decode performance using the example files.
 
 Run from the repo root:
-    python examples/performance_benchmark.py
+    python scripts/performance_benchmark.py
 
 By default all `.v49` and `.vita49` files in `vita_example_files/` are used.
 Use `--pattern` or `--limit` to narrow the run, and `--repeat` to average

@@ -6,7 +6,7 @@ This uses IQStreamWriter with defaults:
 - PayloadFormat: 32-bit IEEE754 float, complex I/Q, processing-efficient
 
 Usage:
-  python examples/write_iq_stream_v49.py out.v49
+  python scripts/write_iq_stream_v49.py out.v49
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from vita49io.io import IQStreamWriter
 
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
-        print("Usage: python examples/write_iq_stream_v49.py <out.v49>")
+        print("Usage: python scripts/write_iq_stream_v49.py <out.v49>")
         return 2
 
     out_path = Path(argv[1])
