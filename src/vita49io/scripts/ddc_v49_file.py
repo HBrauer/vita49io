@@ -6,15 +6,6 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-
-# Allow running the example from the repo root without installation.
-_EXAMPLE_DIR = Path(__file__).resolve().parent
-_SRC_DIR = _EXAMPLE_DIR.parent / "src"
-if _SRC_DIR.is_dir():
-    _src_str = str(_SRC_DIR)
-    if _src_str not in sys.path:
-        sys.path.insert(0, _src_str)
-
 from vita49io.signal.ddc_file import (
     DEFAULT_DECIMATOR_CONFIG_PATH,
     convert_v49_ddc,
@@ -26,23 +17,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="DDC a VITA 49 file (resample + re-pack).",
         epilog=(
             "Examples:\n"
-            "  python scripts/ddc_v49_file.py in.v49 out.v49 \\\n"
+            "  python -m vita49io.scripts.ddc_v49_file in.v49 out.v49 \\\n"
             "    --output-format S16_IQ \\\n"
             "    --output-sample-rate 2048000\n"
             "\n"
-            "  python scripts/ddc_v49_file.py in.v49 out_bw.v49 \\\n"
+            "  python -m vita49io.scripts.ddc_v49_file in.v49 out_bw.v49 \\\n"
             "    --output-format S16_IQ \\\n"
             "    --bandwidth 10000000\n"
             "\n"
-            "  python scripts/ddc_v49_file.py in.v49 out_shifted.v49 \\\n"
+            "  python -m vita49io.scripts.ddc_v49_file in.v49 out_shifted.v49 \\\n"
             "    --output-format F32_IQ \\\n"
             "    --output-sample-rate 1024000 \\\n"
             "    --center-frequency-offset-hz -250000\n"
             "\n"
-            "  python scripts/ddc_v49_file.py in.v49 out_custom.v49 \\\n"
+            "  python -m vita49io.scripts.ddc_v49_file in.v49 out_custom.v49 \\\n"
             "    --output-format S16_IQ \\\n"
             "    --output-sample-rate 1024000 \\\n"
-            "    --config scripts/ddc_v49_file.toml \\\n"
+            "    --config examples/ddc_v49_file.toml \\\n"
             "    --chunk-samples 61140 \\\n"
             "    --samples-per-packet 1024"
         ),

@@ -128,7 +128,7 @@ data_bytes = data_pkt.to_bytes()
 open("out_spectrum.v49", "wb").write(ctx_bytes + data_bytes)
 ```
 
-See `scripts/write_frequency_domain_v49.py` for a complete script.
+See `examples/write_frequency_domain_v49.py` for a complete script.
 
 ## Using `vita49io` to read spectral data and plot a waterfall
 
@@ -173,7 +173,7 @@ if spectra:
     plt.show()
 ```
 
-See `scripts/waterfall_frequency_domain_v49.py` for a runnable version.
+See `examples/waterfall_frequency_domain_v49.py` for a runnable version.
 
 ## Generating illustrative plots (spectrum + waterfall)
 

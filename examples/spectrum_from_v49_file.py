@@ -64,7 +64,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         description="Compute spectra from a VITA 49 file and print (spectrum, sample_rate, center_hz, time).",
         epilog=(
             "GNU Radio QT Frequency Sink-like snapshot example:\n"
-            "  python scripts/spectrum_from_v49_file.py input.v49 "
+            "  python examples/spectrum_from_v49_file.py input.v49 "
             "--processing-mode snapshot --fft-size 1024 --output-fps 10 "
             "--averaging none --band-mode full --power-scale raw --window hann"
         ),

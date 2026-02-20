@@ -5,7 +5,7 @@ Generates synthetic IQ with drifting/pulsing tones plus noise, then encodes it
 as complex cartesian 16-bit fixed-point (I/Q interleaved) in the payload.
 
 Usage:
-  python scripts/write_frequency_domain_v49_fixed16.py out_iq_fixed16.v49
+  python examples/write_frequency_domain_v49_fixed16.py out_iq_fixed16.v49
 """
 
 from __future__ import annotations

@@ -5,7 +5,7 @@ The data header sets the spectrum (S) bit (header bit 24) to indicate Signal Spe
 Context uses CIF0 to describe the payload format and sample rate.
 
 Usage:
-  python scripts/write_frequency_domain_v49.py out_spectrum.v49
+  python examples/write_frequency_domain_v49.py out_spectrum.v49
 """
 
 from __future__ import annotations

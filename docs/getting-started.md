@@ -79,7 +79,7 @@ with open(path, "rb") as f:
                 handle(iq)
 ```
 
-See: `scripts/read_v49_file.py`.
+See: `examples/read_v49_file.py`.
 
 ## 5. Write Data Into A File
 

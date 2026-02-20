@@ -7,7 +7,7 @@ Signal Spectral Data. It will parse headers, collect spectral payloads, and
 display them as a time/frequency waterfall.
 
 Usage:
-  python scripts/waterfall_frequency_domain_v49.py frequency_domain.v49
+  python examples/waterfall_frequency_domain_v49.py frequency_domain.v49
 """
 
 from __future__ import annotations
@@ -78,7 +78,7 @@ def plot_waterfall(spectra: list[np.ndarray]) -> None:
 
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
-        print("Usage: python scripts/waterfall_frequency_domain_v49.py <path.v49>")
+        print("Usage: python examples/waterfall_frequency_domain_v49.py <path.v49>")
         return 2
     path = Path(argv[1])
     spectra = collect_spectra(path)

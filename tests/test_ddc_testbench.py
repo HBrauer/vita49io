@@ -23,7 +23,7 @@ class TestDDCTestbench(unittest.TestCase):
         self.assertAlmostEqual(fold_frequency_hz(-17_000.0, fs), -1_000.0)
 
     def test_scenario_synthesis_and_v49_roundtrip(self) -> None:
-        scenario_path = Path(__file__).resolve().parents[1] / "scripts" / "ddc_test_scenario.toml"
+        scenario_path = Path(__file__).resolve().parents[1] / "examples" / "ddc_test_scenario.toml"
         scenario = load_scenario(scenario_path)
 
         iq, meta = synthesize_composite_iq(scenario)

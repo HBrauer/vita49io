@@ -19,12 +19,12 @@ from vita49io.protocol.context_packet import ContextPacket
 from vita49io.protocol.enums import PacketType, TSI, TSF
 
 _REPO_DEFAULT_CONFIG_PATH = (
-    Path(__file__).resolve().parents[3] / "scripts" / "ddc_v49_file.toml"
+    Path(__file__).resolve().parents[3] / "examples" / "ddc_v49_file.toml"
 )
 DEFAULT_DECIMATOR_CONFIG_PATH = (
     _REPO_DEFAULT_CONFIG_PATH
     if _REPO_DEFAULT_CONFIG_PATH.is_file()
-    else Path("scripts/ddc_v49_file.toml")
+    else Path("examples/ddc_v49_file.toml")
 )
 
 
