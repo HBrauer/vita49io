@@ -79,7 +79,7 @@ with open(path, "rb") as f:
                 handle(iq)
 ```
 
-See: `examples/read_v49_file.py`.
+See: `src/vita49io/scripts/read_v49_file.py` or run `vita-read-v49`.
 
 ## 5. Write Data Into A File
 

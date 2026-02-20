@@ -173,7 +173,7 @@ if spectra:
     plt.show()
 ```
 
-See `examples/waterfall_frequency_domain_v49.py` for a runnable version.
+See `src/vita49io/scripts/waterfall_frequency_domain_v49.py` (or command `vita-waterfall`) for a runnable version.
 
 ## Generating illustrative plots (spectrum + waterfall)
 

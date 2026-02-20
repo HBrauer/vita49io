@@ -16,6 +16,11 @@ dependencies = [
 ]
 dynamic = ["version"]
 
+[project.scripts]
+vita-ddc = "vita49io.scripts.ddc_v49_file:main"
+vita-read = "vita49io.scripts.read_v49_file:main"
+vita-waterfall = "vita49io.scripts.waterfall_frequency_domain_v49:main"
+
 [build-system]
 requires = [
   "setuptools>=61.0",

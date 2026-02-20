@@ -234,7 +234,7 @@ with open(path, "rb") as f:
                 handle(iq)
 ```
 
-See: `examples/read_v49_file.py`.
+See: `src/vita49io/scripts/read_v49_file.py` or run `vita-read-v49`.
 
 Write Data Into A File
 ---------------------------
@@ -276,11 +276,11 @@ See: `examples/write_iq_stream_v49.py`.
 Examples
 --------
 
-- `examples/read_v49_file.py`: parse and print packets from a file
+- `vita-read` (`src/vita49io/scripts/read_v49_file.py`): parse and print packets from a file
 - `examples/write_frequency_domain_v49.py`: synthesize spectral bins and write context + spectral data packets (S-bit set)
 - `examples/write_iq_stream_v49.py`: synthesize a tone and write IQ packets
 - `examples/waterfall_v49_file.py`: visualize spectrogram
-- `examples/waterfall_frequency_domain_v49.py`: read spectral packets (S-bit) and display a waterfall
+- `vita-waterfall` (`src/vita49io/scripts/waterfall_frequency_domain_v49.py`): render a waterfall from IQ data packets
 
 License
 -------

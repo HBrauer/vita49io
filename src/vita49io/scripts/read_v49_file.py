@@ -1,17 +1,8 @@
 from __future__ import annotations
 
-import os
-import sys
 import argparse
+import sys
 from typing import Optional
-
-
-def _ensure_src_on_path() -> None:
-    # Allow running the example from the repo root without installation
-    here = os.path.dirname(__file__)
-    src = os.path.normpath(os.path.join(here, "..", "src"))
-    if os.path.isdir(src) and src not in sys.path:
-        sys.path.insert(0, src)
 
 
 def read_all_packets(path: str):
@@ -57,8 +48,6 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    _ensure_src_on_path()
-
     from vita49io.protocol.context_packet import ContextPacket
 
     args = _parse_args(sys.argv[1:] if argv is None else argv)
