@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -7,6 +8,7 @@ import numpy as np
 
 from vita49io.defaults.default_payload_formats import DefaultPayloadFormats
 from vita49io.io.iq_writer import IQStreamWriter
+from vita49io.protocol.cif0 import PayloadFormat
 from vita49io.signal.ddc_file import convert_v49_ddc
 from vita49io.signal.ddc_testbench import read_v49_iq
 
@@ -18,27 +20,63 @@ def _write_input_v49(
     iq: np.ndarray,
     start_time_epoch_s: float | None = None,
     packet_samples: int = 1024,
+    payload_format: PayloadFormat | None = None,
+    include_context_packet: bool = True,
+    context_after_first_data_packet: bool = False,
 ) -> None:
+    if payload_format is None:
+        payload_format = DefaultPayloadFormats.S16_IQ
+
     writer = IQStreamWriter(
         stream_id=0x12345678,
         sample_rate_hz=fs_in,
-        payload_format=DefaultPayloadFormats.S16_IQ,
+        payload_format=payload_format,
         bandwidth_hz=80_000_000.0,
         rf_reference_frequency_hz=915_000_000.0,
         start_time_epoch_s=start_time_epoch_s,
     )
 
+    data_packets: list[bytes] = []
+    for start in range(0, iq.size, packet_samples):
+        block = iq[start : start + packet_samples]
+        if block.size < packet_samples:
+            pad = np.zeros(packet_samples - block.size, dtype=np.complex64)
+            block = np.concatenate([block, pad])
+        data_packets.append(writer.build_data_packet_bytes(block))
+
     with path.open("wb") as f:
-        f.write(writer.build_context_packet().to_bytes())
-        for start in range(0, iq.size, packet_samples):
-            block = iq[start : start + packet_samples]
-            if block.size < packet_samples:
-                pad = np.zeros(packet_samples - block.size, dtype=np.complex64)
-                block = np.concatenate([block, pad])
-            f.write(writer.build_data_packet_bytes(block))
+        context_bytes = writer.build_context_packet().to_bytes()
+        if not include_context_packet:
+            for packet in data_packets:
+                f.write(packet)
+            return
+        if context_after_first_data_packet and data_packets:
+            f.write(data_packets[0])
+            f.write(context_bytes)
+            for packet in data_packets[1:]:
+                f.write(packet)
+            return
+        f.write(context_bytes)
+        for packet in data_packets:
+            f.write(packet)
 
 
 class TestDDCFileCore(unittest.TestCase):
+    @staticmethod
+    def _write_identity_config(path: Path, *, sample_rate_hz: int) -> None:
+        path.write_text(
+            "\n".join(
+                [
+                    "[[decimator.paths]]",
+                    f"input_sample_rate = {sample_rate_hz}",
+                    f"output_sample_rate = {sample_rate_hz}",
+                    f"bandwidth = {sample_rate_hz // 2}",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
     def test_convert_v49_ddc_core_api_direct(self) -> None:
         fs_in = 98_304_000.0
         fs_out = 24_576_000
@@ -221,6 +259,185 @@ class TestDDCFileCore(unittest.TestCase):
             # Input packet duration is 1.024s. Window [2.0, 4.0) overlaps exactly packets
             # [1.024,2.048), [2.048,3.072), [3.072,4.096) => 3 packets.
             self.assertEqual(summary["input_samples"], 3 * 1024)
+
+    def test_non_strict_mode_ignores_repeat_count_and_vector_size(self) -> None:
+        fs_in = 1_000.0
+        n_samples = 2_048
+        t = np.arange(n_samples, dtype=np.float64) / fs_in
+        iq = (0.5 * np.exp(1j * 2.0 * np.pi * 50.0 * t)).astype(np.complex64)
+        non_strict_pf = replace(DefaultPayloadFormats.S16_IQ, repeat_count=4, vector_size=7)
+
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            in_path = td_path / "in.v49"
+            out_path = td_path / "out.v49"
+            config_path = td_path / "identity.toml"
+            self._write_identity_config(config_path, sample_rate_hz=int(fs_in))
+            _write_input_v49(
+                in_path,
+                fs_in=fs_in,
+                iq=iq,
+                payload_format=non_strict_pf,
+            )
+
+            summary = convert_v49_ddc(
+                input_path=in_path,
+                output_path=out_path,
+                output_format_name="S16_IQ",
+                output_sample_rate_hz=int(fs_in),
+                chunk_samples=512,
+                samples_per_packet=256,
+                config_path=config_path,
+            )
+
+            self.assertEqual(summary["input_payload_format"], "S16_IQ")
+            self.assertEqual(summary["input_samples"], n_samples)
+            self.assertGreater(summary["output_samples"], 0)
+
+    def test_strict_mode_rejects_repeat_count_and_vector_size_mismatch(self) -> None:
+        fs_in = 1_000.0
+        n_samples = 2_048
+        t = np.arange(n_samples, dtype=np.float64) / fs_in
+        iq = (0.5 * np.exp(1j * 2.0 * np.pi * 50.0 * t)).astype(np.complex64)
+        non_strict_pf = replace(DefaultPayloadFormats.S16_IQ, repeat_count=4, vector_size=7)
+
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            in_path = td_path / "in.v49"
+            out_path = td_path / "out.v49"
+            config_path = td_path / "identity.toml"
+            self._write_identity_config(config_path, sample_rate_hz=int(fs_in))
+            _write_input_v49(
+                in_path,
+                fs_in=fs_in,
+                iq=iq,
+                payload_format=non_strict_pf,
+            )
+
+            with self.assertRaisesRegex(ValueError, "Unsupported input payload format"):
+                convert_v49_ddc(
+                    input_path=in_path,
+                    output_path=out_path,
+                    output_format_name="S16_IQ",
+                    output_sample_rate_hz=int(fs_in),
+                    chunk_samples=512,
+                    samples_per_packet=256,
+                    config_path=config_path,
+                    strict_payload_format=True,
+                )
+
+    def test_input_format_override_decodes_first_packet_before_context(self) -> None:
+        fs_in = 1_000.0
+        n_samples = 4_096
+        packet_samples = 1_024
+        t = np.arange(n_samples, dtype=np.float64) / fs_in
+        iq = (0.5 * np.exp(1j * 2.0 * np.pi * 25.0 * t)).astype(np.complex64)
+
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            in_path = td_path / "in.v49"
+            out_without_override = td_path / "out_without_override.v49"
+            out_with_override = td_path / "out_with_override.v49"
+            config_path = td_path / "identity.toml"
+            self._write_identity_config(config_path, sample_rate_hz=int(fs_in))
+            _write_input_v49(
+                in_path,
+                fs_in=fs_in,
+                iq=iq,
+                packet_samples=packet_samples,
+                context_after_first_data_packet=True,
+            )
+
+            summary_without_override = convert_v49_ddc(
+                input_path=in_path,
+                output_path=out_without_override,
+                output_format_name="S16_IQ",
+                output_sample_rate_hz=int(fs_in),
+                chunk_samples=512,
+                samples_per_packet=256,
+                config_path=config_path,
+            )
+            summary_with_override = convert_v49_ddc(
+                input_path=in_path,
+                output_path=out_with_override,
+                output_format_name="S16_IQ",
+                input_format_name="S16_IQ",
+                output_sample_rate_hz=int(fs_in),
+                chunk_samples=512,
+                samples_per_packet=256,
+                config_path=config_path,
+            )
+
+            self.assertEqual(summary_without_override["data_packets_seen"], 4)
+            self.assertEqual(summary_without_override["input_samples"], n_samples - packet_samples)
+            self.assertEqual(summary_with_override["input_samples"], n_samples)
+
+    def test_no_context_mode_uses_explicit_input_metadata(self) -> None:
+        fs_in = 1_000.0
+        n_samples = 4_096
+        t = np.arange(n_samples, dtype=np.float64) / fs_in
+        iq = (0.5 * np.exp(1j * 2.0 * np.pi * 40.0 * t)).astype(np.complex64)
+
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            in_path = td_path / "in_no_context.v49"
+            out_path = td_path / "out.v49"
+            config_path = td_path / "identity.toml"
+            self._write_identity_config(config_path, sample_rate_hz=int(fs_in))
+            _write_input_v49(
+                in_path,
+                fs_in=fs_in,
+                iq=iq,
+                include_context_packet=False,
+            )
+
+            summary = convert_v49_ddc(
+                input_path=in_path,
+                output_path=out_path,
+                output_format_name="S16_IQ",
+                input_format_name="S16_IQ",
+                input_sample_rate_hz=int(fs_in),
+                input_bandwidth_hz=800.0,
+                output_sample_rate_hz=int(fs_in),
+                chunk_samples=512,
+                samples_per_packet=256,
+                config_path=config_path,
+            )
+
+            self.assertEqual(summary["context_packets_seen"], 0)
+            self.assertEqual(summary["input_samples"], n_samples)
+            self.assertGreater(summary["output_samples"], 0)
+
+    def test_no_context_mode_requires_sample_rate_metadata(self) -> None:
+        fs_in = 1_000.0
+        n_samples = 2_048
+        t = np.arange(n_samples, dtype=np.float64) / fs_in
+        iq = (0.5 * np.exp(1j * 2.0 * np.pi * 40.0 * t)).astype(np.complex64)
+
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            in_path = td_path / "in_no_context.v49"
+            out_path = td_path / "out.v49"
+            config_path = td_path / "identity.toml"
+            self._write_identity_config(config_path, sample_rate_hz=int(fs_in))
+            _write_input_v49(
+                in_path,
+                fs_in=fs_in,
+                iq=iq,
+                include_context_packet=False,
+            )
+
+            with self.assertRaisesRegex(ValueError, "Input sample rate is missing"):
+                convert_v49_ddc(
+                    input_path=in_path,
+                    output_path=out_path,
+                    output_format_name="S16_IQ",
+                    input_format_name="S16_IQ",
+                    output_sample_rate_hz=int(fs_in),
+                    chunk_samples=512,
+                    samples_per_packet=256,
+                    config_path=config_path,
+                )
 
 
 if __name__ == "__main__":

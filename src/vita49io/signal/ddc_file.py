@@ -275,9 +275,35 @@ def _packet_time_s(integer_seconds: Optional[int], fractional_seconds: Optional[
     return sec + (frac / float(1 << 64))
 
 
-def _resolve_input_format_name(pf, supported_formats: Dict[str, Any]) -> Optional[str]:
+def _payload_format_matches(
+    pf: PayloadFormat,
+    expected: PayloadFormat,
+    *,
+    strict: bool,
+) -> bool:
+    if strict:
+        return pf == expected
+    return (
+        pf.packing_method == expected.packing_method
+        and pf.sample_type == expected.sample_type
+        and pf.sample_component_repeat == expected.sample_component_repeat
+        and pf.event_tag_size_bits == expected.event_tag_size_bits
+        and pf.channel_tag_size_bits == expected.channel_tag_size_bits
+        and pf.data_item_fraction_size_bits == expected.data_item_fraction_size_bits
+        and pf.item_packing_field_size_bits == expected.item_packing_field_size_bits
+        and pf.data_item_size_bits == expected.data_item_size_bits
+        and pf.data_item_format == expected.data_item_format
+    )
+
+
+def _resolve_input_format_name(
+    pf: PayloadFormat,
+    supported_formats: Dict[str, Any],
+    *,
+    strict: bool,
+) -> Optional[str]:
     for name, fmt in supported_formats.items():
-        if pf == fmt:
+        if _payload_format_matches(pf, fmt, strict=strict):
             return name
     return None
 
@@ -667,7 +693,8 @@ def _validate_output_band_within_input(
 ) -> None:
     if input_bandwidth_hz is None:
         raise ValueError(
-            "Input CIF0 bandwidth_hz is missing; cannot verify requested center frequency"
+            "Input bandwidth is missing; cannot verify requested center frequency. "
+            "Provide input_bandwidth_hz argument or CIF0 bandwidth_hz context."
         )
 
     in_bw = float(input_bandwidth_hz)
@@ -701,7 +728,23 @@ def convert_v49_ddc(
     center_frequency_offset_hz: Optional[float] = None,
     start_time_epoch_s: Optional[float] = None,
     end_time_epoch_s: Optional[float] = None,
+    input_format_name: Optional[str] = None,
+    strict_payload_format: bool = False,
+    input_sample_rate_hz: Optional[int] = None,
+    input_bandwidth_hz: Optional[float] = None,
+    input_rf_reference_frequency_hz: Optional[float] = None,
 ) -> Dict[str, int]:
+    """Convert a VITA-49 IQ file through a configured DDC/decimation path.
+
+    Context-driven mode (default):
+    - Reads input payload format, sample rate, and bandwidth from incoming CIF0 context.
+
+    No-context mode:
+    - Works even when the input stream has no context packets.
+    - Provide `input_format_name`, `input_sample_rate_hz`, and `input_bandwidth_hz`.
+    - If `center_frequency_offset_hz` is used, also provide
+      `input_rf_reference_frequency_hz` when RF reference is not present in context.
+    """
     config_path = (config_path or DEFAULT_DECIMATOR_CONFIG_PATH).expanduser()
     decimator_paths = _load_decimator_paths(config_path)
 
@@ -720,6 +763,17 @@ def convert_v49_ddc(
         )
     output_payload_format = supported_formats[output_format_name]
 
+    configured_input_payload_format: Optional[PayloadFormat] = None
+    configured_input_format_name: Optional[str] = None
+    if input_format_name is not None:
+        configured_input_format_name = str(input_format_name).upper()
+        if configured_input_format_name not in supported_formats:
+            raise ValueError(
+                f"Unsupported input format '{configured_input_format_name}'. "
+                f"Supported: {', '.join(sorted(supported_formats))}"
+            )
+        configured_input_payload_format = supported_formats[configured_input_format_name]
+
     if output_sample_rate_hz is None and target_bandwidth_hz is None:
         raise ValueError("Specify output_sample_rate_hz or target_bandwidth_hz")
     if output_sample_rate_hz is not None and target_bandwidth_hz is not None:
@@ -736,6 +790,10 @@ def convert_v49_ddc(
         raise ValueError("chunk_samples must be > 0")
     if samples_per_packet <= 0:
         raise ValueError("samples_per_packet must be > 0")
+    if input_sample_rate_hz is not None and int(input_sample_rate_hz) <= 0:
+        raise ValueError("input_sample_rate_hz must be > 0 when provided")
+    if input_bandwidth_hz is not None and float(input_bandwidth_hz) <= 0.0:
+        raise ValueError("input_bandwidth_hz must be > 0 when provided")
     if (
         start_time_epoch_s is not None
         and end_time_epoch_s is not None
@@ -750,11 +808,19 @@ def convert_v49_ddc(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # State from the first context packet
-    input_sample_rate_hz: Optional[int] = None
-    input_payload_format = None
-    input_payload_name: Optional[str] = None
-    input_bandwidth_hz: Optional[float] = None
-    input_rf_ref_hz: Optional[float] = None
+    input_sample_rate_hz: Optional[int] = (
+        int(input_sample_rate_hz) if input_sample_rate_hz is not None else None
+    )
+    input_payload_format: Optional[PayloadFormat] = configured_input_payload_format
+    input_payload_name: Optional[str] = configured_input_format_name
+    input_bandwidth_hz: Optional[float] = (
+        float(input_bandwidth_hz) if input_bandwidth_hz is not None else None
+    )
+    input_rf_ref_hz: Optional[float] = (
+        float(input_rf_reference_frequency_hz)
+        if input_rf_reference_frequency_hz is not None
+        else None
+    )
     input_rf_ref_offset_hz: Optional[float] = None
     input_if_ref_hz: Optional[float] = None
     input_if_band_offset_hz: Optional[float] = None
@@ -765,6 +831,7 @@ def convert_v49_ddc(
     input_context_tsm: bool = False
     input_stream_id: Optional[int] = None
     first_context_time_s: Optional[float] = None
+    first_selected_data_packet_time_s: Optional[float] = None
 
     # Resampling parameters
     decimator_path: Optional[DecimatorPath] = None
@@ -830,6 +897,7 @@ def convert_v49_ddc(
                         input_payload_name = _resolve_input_format_name(
                             input_payload_format,
                             supported_formats,
+                            strict=bool(strict_payload_format),
                         )
                     if input_sample_rate_hz is None and cif0.sample_rate_hz is not None:
                         input_sample_rate_hz = int(round(float(cif0.sample_rate_hz)))
@@ -858,7 +926,7 @@ def convert_v49_ddc(
 
             if isinstance(pkt, RawDataPacket):
                 data_packets_seen += 1
-                if input_payload_format is None or input_sample_rate_hz is None:
+                if input_payload_format is None:
                     skipped_packets += 1
                     continue
                 if input_payload_name is None:
@@ -878,6 +946,10 @@ def convert_v49_ddc(
                         )
 
                 if time_window_enabled:
+                    if input_sample_rate_hz is None:
+                        raise ValueError(
+                            "Time slicing requires input sample rate before data packets"
+                        )
                     packet_n_samples = _packet_sample_count(pkt.payload, input_payload_format)
                     packet_end_time_s = packet_start_time_s + (
                         float(packet_n_samples) / float(input_sample_rate_hz)
@@ -895,6 +967,28 @@ def convert_v49_ddc(
                     ):
                         skipped_packets += 1
                         break
+
+                if input_stream_id is None and pkt.stream_id is not None:
+                    input_stream_id = pkt.stream_id
+                if (
+                    first_selected_data_packet_time_s is None
+                    and packet_start_time_s is not None
+                ):
+                    first_selected_data_packet_time_s = packet_start_time_s
+
+                if payload_decoder is None:
+                    payload_decoder = build_payload_decoder(
+                        input_payload_format,
+                        validate_strict=bool(strict_payload_format),
+                    )
+                iq = payload_decoder(pkt.payload)
+
+                in_chunks.append(iq)
+                in_count += int(iq.size)
+                total_in_samples += int(iq.size)
+
+                if input_sample_rate_hz is None:
+                    continue
 
                 if runtime_stage_chain is None:
                     decimator_path, selected_output_sample_rate_hz = _get_decimator_path_for_request(
@@ -926,10 +1020,10 @@ def convert_v49_ddc(
 
                 if writer is None:
                     if input_stream_id is None:
-                        input_stream_id = pkt.stream_id
-                    if input_stream_id is None:
-                        raise ValueError("Input stream_id is missing; cannot write output stream")
-                    start_time_s = packet_start_time_s
+                        input_stream_id = 1
+                    start_time_s = first_selected_data_packet_time_s
+                    if start_time_s is None:
+                        start_time_s = packet_start_time_s
                     if start_time_s is None:
                         start_time_s = first_context_time_s
                     writer = IQStreamWriter(
@@ -956,14 +1050,6 @@ def convert_v49_ddc(
                     )
                     f_out.write(writer.build_context_packet().to_bytes())
 
-                if payload_decoder is None:
-                    payload_decoder = build_payload_decoder(input_payload_format)
-                iq = payload_decoder(pkt.payload)
-
-                in_chunks.append(iq)
-                in_count += int(iq.size)
-                total_in_samples += int(iq.size)
-
                 while in_count >= chunk_samples:
                     combined = np.concatenate(in_chunks) if len(in_chunks) > 1 else in_chunks[0]
                     block = combined[:chunk_samples]
@@ -980,6 +1066,16 @@ def convert_v49_ddc(
             skipped_packets += 1
 
         # Process remaining samples after loop ends
+        if data_packets_seen > 0 and input_payload_format is None:
+            raise ValueError(
+                "Input payload format is missing; cannot decode data packets. "
+                "Provide input_format_name argument or CIF0 payload_format context."
+            )
+        if in_count > 0 and input_sample_rate_hz is None:
+            raise ValueError(
+                "Input sample rate is missing; cannot process data packets. "
+                "Provide input_sample_rate_hz argument or CIF0 sample_rate_hz context."
+            )
         if in_count > 0 and input_sample_rate_hz is not None and input_payload_format is not None:
             combined = np.concatenate(in_chunks) if len(in_chunks) > 1 else in_chunks[0]
             if runtime_stage_chain is None:

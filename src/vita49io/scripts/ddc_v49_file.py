@@ -14,7 +14,10 @@ from vita49io.signal.ddc_file import (
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="DDC a VITA 49 file (resample + re-pack).",
+        description=(
+            "DDC a VITA 49 file (resample + re-pack). "
+            "No-context mode is supported when required input metadata is passed via CLI."
+        ),
         epilog=(
             "Examples:\n"
             "  python -m vita49io.scripts.ddc_v49_file in.v49 out.v49 \\\n"
@@ -35,7 +38,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "    --output-sample-rate 1024000 \\\n"
             "    --config examples/ddc_v49_file.toml \\\n"
             "    --chunk-samples 61140 \\\n"
-            "    --samples-per-packet 1024"
+            "    --samples-per-packet 1024\n"
+            "\n"
+            "  # No-context mode: input stream has no context packets.\n"
+            "  # Provide input format, sample rate, and bandwidth explicitly.\n"
+            "  python -m vita49io.scripts.ddc_v49_file in_no_ctx.v49 out.v49 \\\n"
+            "    --input-format S16_IQ \\\n"
+            "    --input-sample-rate 98304000 \\\n"
+            "    --input-bandwidth 80000000 \\\n"
+            "    --output-format S16_IQ \\\n"
+            "    --output-sample-rate 24576000"
         ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
@@ -45,6 +57,52 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--output-format",
         required=True,
         help="Output payload format (F32_IQ, S32_IQ, S24_IQ, S16_IQ)",
+    )
+    parser.add_argument(
+        "--input-format",
+        default=None,
+        help=(
+            "Optional input payload format override (F32_IQ, S32_IQ, S24_IQ, S16_IQ). "
+            "When set, decoding uses this format starting from the first data packet."
+        ),
+    )
+    parser.add_argument(
+        "--input-sample-rate",
+        type=int,
+        default=None,
+        help=(
+            "Optional input sample rate in Hz. Required for no-context mode if "
+            "sample rate is not available from context."
+        ),
+    )
+    parser.add_argument(
+        "--input-bandwidth",
+        type=float,
+        default=None,
+        help=(
+            "Optional input bandwidth in Hz. Required for no-context mode if "
+            "bandwidth is not available from context."
+        ),
+    )
+    parser.add_argument(
+        "--input-rf-reference-frequency-hz",
+        type=float,
+        default=None,
+        help=(
+            "Optional input RF reference frequency in Hz. Needed when using "
+            "--center-frequency-offset-hz without context RF reference metadata."
+        ),
+    )
+    parser.add_argument(
+        "--strict-payload-format",
+        "--strict",
+        "--stricked",
+        dest="strict_payload_format",
+        action="store_true",
+        help=(
+            "Enable strict payload-format validation (exact match including repeat_count "
+            "and vector_size). Default mode ignores repeat_count/vector_size."
+        ),
     )
     output_selector_group = parser.add_mutually_exclusive_group(required=True)
     output_selector_group.add_argument(
@@ -177,6 +235,23 @@ def main(argv: list[str] | None = None) -> int:
             end_time_epoch_s=(
                 _parse_iso_utc_time(args.end_time, option_name="--end-time")
                 if args.end_time is not None
+                else None
+            ),
+            input_format_name=args.input_format,
+            strict_payload_format=bool(args.strict_payload_format),
+            input_sample_rate_hz=(
+                int(args.input_sample_rate)
+                if args.input_sample_rate is not None
+                else None
+            ),
+            input_bandwidth_hz=(
+                float(args.input_bandwidth)
+                if args.input_bandwidth is not None
+                else None
+            ),
+            input_rf_reference_frequency_hz=(
+                float(args.input_rf_reference_frequency_hz)
+                if args.input_rf_reference_frequency_hz is not None
                 else None
             ),
             config_path=Path(args.config).expanduser() if args.config else None,
