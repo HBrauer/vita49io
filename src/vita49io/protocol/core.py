@@ -282,7 +282,9 @@ def _pack_common_prefix(c: _Common) -> List[int]:
 
     if c.class_id is not None:
         oui, ic, pc = c.class_id
-        words.append(_u32((oui & 0xFFFFFF) << 8))
+        # Class ID word 1: bits 31..27 are pad count, 26..24 are reserved,
+        # and the 24-bit OUI occupies bits 23..0 (VITA 49.2 §5.1.3).
+        words.append(_u32(oui & 0xFFFFFF))
         words.append(_u32(((ic & 0xFFFF) << 16) | (pc & 0xFFFF)))
 
     if c.header.tsi != TSI.NONE:
@@ -345,7 +347,7 @@ def _parse_common_from_words(words: List[int]) -> tuple[_Common, int, int]:
         w_a = words[idx]
         w_b = words[idx + 1]
         idx += 2
-        oui = (w_a >> 8) & 0xFFFFFF
+        oui = w_a & 0xFFFFFF
         information_class = (w_b >> 16) & 0xFFFF
         packet_class = w_b & 0xFFFF
         class_id = (oui, information_class, packet_class)
@@ -410,7 +412,7 @@ def _parse_common_from_bytes(data: memoryview) -> Tuple[_Common, int, int]:
         w_a = WORD.unpack_from(data, idx)[0]
         w_b = WORD.unpack_from(data, idx + 4)[0]
         idx += 8
-        oui = (w_a >> 8) & 0xFFFFFF
+        oui = w_a & 0xFFFFFF
         information_class = (w_b >> 16) & 0xFFFF
         packet_class = w_b & 0xFFFF
         class_id = (oui, information_class, packet_class)

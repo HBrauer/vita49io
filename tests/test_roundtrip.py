@@ -1,7 +1,7 @@
 import unittest
 
 from vita49io import DataPacket, ContextPacket, PacketType, TSI, TSF, CIF0Fields
-from vita49io.protocol.core import Header
+from vita49io.protocol.core import Header, _parse_common_from_words
 
 
 class TestVRT(unittest.TestCase):
@@ -55,21 +55,44 @@ class TestVRT(unittest.TestCase):
         p = ContextPacket(
             packet_type=PacketType.CONTEXT_PACKET,
             stream_id=0x01020304,
-            class_id=(0x00AABB, 0x1122, 0x3344),
+            class_id=(0xABCDEF, 0x1122, 0x3344),
             tsi=TSI.NONE,
             tsf=TSF.NONE,
             cif0=CIF0Fields(),
         )
         b = p.to_bytes()
+        # Class ID word 1 reserves bits 31..24; the OUI is in bits 23..0.
+        self.assertEqual(b[8:12], b"\x00\xAB\xCD\xEF")
         q = ContextPacket.from_bytes(b)
         self.assertEqual(q.packet_type, PacketType.CONTEXT_PACKET)
         self.assertEqual(q.stream_id, 0x01020304)
-        self.assertEqual(q.class_id, (0x00AABB, 0x1122, 0x3344))
+        self.assertEqual(q.class_id, (0xABCDEF, 0x1122, 0x3344))
         self.assertEqual(q.tsi, TSI.NONE)
         self.assertEqual(q.tsf, TSF.NONE)
         # Context packets have no trailer; bit has no meaning
         # Ensure no trailer attribute/field is present
         self.assertFalse(hasattr(q, "trailer"))
+
+    def test_parses_standard_class_id_oui_fixture(self):
+        """Parse a literal VITA 49.2 Class ID field, without using our encoder."""
+        # Header (Context, Class ID present, five words), Stream ID, then
+        # Class ID words.  The OUI occupies bits 23..0 of its first word.
+        raw = bytes.fromhex(
+            "48 00 00 05 "
+            "01 02 03 04 "
+            "00 AB CD EF "
+            "11 22 33 44 "
+            "00 00 00 00"
+        )
+
+        packet = ContextPacket.from_bytes(raw)
+        self.assertEqual(packet.class_id, (0xABCDEF, 0x1122, 0x3344))
+
+        # Cover the list-of-words parser too; it is deliberately independent
+        # of both the fixture decoder and the serializer.
+        words = [int.from_bytes(raw[offset : offset + 4], "big") for offset in range(0, len(raw), 4)]
+        common, _, _ = _parse_common_from_words(words)
+        self.assertEqual(common.class_id, (0xABCDEF, 0x1122, 0x3344))
 
     def test_data_header_roundtrip_all_types_tsi_tsf(self):
         # Exercise all data packet types with and without timestamps

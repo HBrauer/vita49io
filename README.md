@@ -193,6 +193,7 @@ Notes
 - When you already have encoded bytes, set `payload` directly.
 - Use `payload_from_numpy`, `payload_as_numpy`, and `payload_as_numpy_view` to translate between payload bytes and NumPy arrays.
 - For frequency-domain Signal Spectral Data, set header bit 24 (`indicators_24=True`) or use `IQStreamWriter(frequency_domain=True)` to raise the S-bit per AV49.2 Rule 6.3.1-2.
+- A `class_id` tuple is `(OUI, information_class, packet_class)`; its 24-bit OUI is encoded in bits 23–0 of the first Class ID word, per VITA 49.2 §5.1.3.
 - In `SpectrumProcessor`/`SpectrumStreamProcessor` continuous mode, omitting `hop_size` defaults it to `fft_size` (no overlap). In snapshot mode, one FFT is computed per output frame from the latest `fft_size` samples.
 - GNU Radio QT Frequency Sink-like snapshot example:
   `python examples/spectrum_from_v49_file.py input.v49 --processing-mode snapshot --fft-size 1024 --output-fps 10 --averaging none --band-mode full --power-scale raw --window hann`
