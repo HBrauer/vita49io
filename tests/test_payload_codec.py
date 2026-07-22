@@ -160,7 +160,25 @@ class TestPayloadCodec(unittest.TestCase):
         quantization = 1.0 / (1 << 23)
         np.testing.assert_allclose(decoded, samples, atol=quantization)
 
-        expected_u32 = np.array([0x00400000, 0x00C00000], dtype=">u4").tobytes()
+        # VITA 49.2 §6.1.1.1 requires the 24-bit Data Item to be
+        # left-justified in its 32-bit Item Packing Field.
+        expected_u32 = np.array([0x40000000, 0xC0000000], dtype=">u4").tobytes()
+        self.assertEqual(payload, expected_u32)
+
+    def test_real_unsigned_fixed_point_24_in_32_encoding(self) -> None:
+        pf = _make_pf(
+            sample_type=SampleType.REAL,
+            data_item_format=DataItemFormat.UNSIGNED_FIXED_POINT,
+            item_packing_field_size_bits=32,
+            data_item_size_bits=24,
+        )
+        samples = np.array([0.25, 0.5], dtype=np.float32)
+        payload = payload_from_numpy(samples, pf)
+        decoded = payload_as_numpy(payload, pf)
+        quantization = 1.0 / (1 << 24)
+        np.testing.assert_allclose(decoded, samples, atol=quantization)
+
+        expected_u32 = np.array([0x40000000, 0x80000000], dtype=">u4").tobytes()
         self.assertEqual(payload, expected_u32)
 
     def test_complex_view_for_float32(self) -> None:

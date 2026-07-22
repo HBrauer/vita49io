@@ -227,7 +227,9 @@ def _build_decoder_from_key(key: Tuple[int, ...]) -> PayloadDecoder:
 
         return decode_cx_u32
 
-    # Generic fallback for less-common packed formats.
+    # Generic fallback for less-common packed formats.  A Data Item is
+    # left-justified in its Item Packing Field (VITA 49.2 §6.1.1.1), so remove
+    # the unused least-significant bits before interpreting the item.
     if ipf == 16:
         def _fields(payload: Union[bytes, memoryview]) -> "np.ndarray":
             return np.frombuffer(payload, dtype=">u2").astype(np.uint32)
@@ -242,7 +244,7 @@ def _build_decoder_from_key(key: Tuple[int, ...]) -> PayloadDecoder:
             def decode_real_generic_signed(payload: Union[bytes, memoryview]) -> "np.ndarray":
                 uvals = _fields(payload)
                 if di < 32:
-                    uvals = (uvals & ((1 << di) - 1)).astype(np.uint32, copy=False)
+                    uvals = (uvals >> (ipf - di)).astype(np.uint32, copy=False)
                     s = (uvals.astype(np.int32) << (32 - di)) >> (32 - di)
                 else:
                     s = uvals.astype(np.int32)
@@ -253,7 +255,7 @@ def _build_decoder_from_key(key: Tuple[int, ...]) -> PayloadDecoder:
         def decode_cx_generic_signed(payload: Union[bytes, memoryview]) -> "np.ndarray":
             uvals = _fields(payload)
             if di < 32:
-                uvals = (uvals & ((1 << di) - 1)).astype(np.uint32, copy=False)
+                uvals = (uvals >> (ipf - di)).astype(np.uint32, copy=False)
                 s = (uvals.astype(np.int32) << (32 - di)) >> (32 - di)
             else:
                 s = uvals.astype(np.int32)
@@ -271,7 +273,7 @@ def _build_decoder_from_key(key: Tuple[int, ...]) -> PayloadDecoder:
         def decode_real_generic_unsigned(payload: Union[bytes, memoryview]) -> "np.ndarray":
             uvals = _fields(payload)
             if di < 32:
-                uvals = (uvals & ((1 << di) - 1)).astype(np.uint32, copy=False)
+                uvals = (uvals >> (ipf - di)).astype(np.uint32, copy=False)
             return (uvals.astype(np.float32) / scale).astype(np.float32)
 
         return decode_real_generic_unsigned
@@ -279,7 +281,7 @@ def _build_decoder_from_key(key: Tuple[int, ...]) -> PayloadDecoder:
     def decode_cx_generic_unsigned(payload: Union[bytes, memoryview]) -> "np.ndarray":
         uvals = _fields(payload)
         if di < 32:
-            uvals = (uvals & ((1 << di) - 1)).astype(np.uint32, copy=False)
+            uvals = (uvals >> (ipf - di)).astype(np.uint32, copy=False)
         vals = (uvals.astype(np.float32) / scale).astype(np.float32)
         if vals.size % 2 != 0:
             raise ValueError("Payload does not contain an even number of components for I/Q")
@@ -360,7 +362,8 @@ def payload_as_numpy_view(
             - IEEE754 single (32-bit float, 32-bit field) yields a `>c8` view.
             - Signed fixed-point (16/24/32-bit items in 16/32-bit fields).
             - Unsigned fixed-point (16/24/32-bit items in 16/32-bit fields).
-        - Fixed-point yields integer views; 16-in-32 returns lower 16 bits.
+        - Fixed-point yields integer views; 16-in-32 returns the leading
+          (most-significant) 16 bits of each field.
     """
     ipf, di, fmt = _validate_supported(pf, validate_strict=validate_strict)
     sample_type = pf.sample_type
@@ -372,8 +375,9 @@ def payload_as_numpy_view(
         return np.frombuffer(payload, dtype=">c8")
     if ipf == 32 and di == 16:
         dtype = ">i2" if fmt == DataItemFormat.SIGNED_FIXED_POINT else ">u2"
-        # 32-bit fields store the data item in the lower 16 bits (big-endian).
-        vals16 = np.frombuffer(payload, dtype=dtype)[1::2]
+        # The 16-bit item occupies the most-significant half of each 32-bit
+        # field; the following half is unused.
+        vals16 = np.frombuffer(payload, dtype=dtype)[::2]
         if sample_type == SampleType.REAL:
             return vals16
         if vals16.size % 2 != 0:
@@ -384,7 +388,7 @@ def payload_as_numpy_view(
         raise ValueError(
             "Native sample view requires full-width 16- or 32-bit data items "
             "(item_packing_field_size_bits == data_item_size_bits), "
-            "except 16-in-32 fixed-point which returns the lower 16 bits."
+            "except 16-in-32 fixed-point which returns the leading 16 bits."
         )
 
     if fmt == DataItemFormat.SIGNED_FIXED_POINT:
@@ -495,7 +499,8 @@ def payload_from_numpy(
             u16 = np.rint(vals_c * scale).astype(np.uint16)
             return u16.astype(">u2").tobytes()
 
-    # Generic fixed-point encoding into 32-bit fields (16 or 24-bit in lower bits)
+    # Generic fixed-point encoding into 32-bit fields.  VITA 49.2 §6.1.1.1
+    # requires the Data Item to be left-justified within its packing field.
     if fmt == DataItemFormat.SIGNED_FIXED_POINT:
         scale = float(1 << (di - 1))
         max_val = (float((1 << (di - 1)) - 1)) / scale
@@ -508,8 +513,8 @@ def payload_from_numpy(
         vals_c = np.clip(vals, 0.0, max_val)
         uvals = np.rint(vals_c * scale).astype(np.uint32)
 
-    # ipf == 32 here; pack lower di bits of 32-bit field
-    fields32 = (uvals & ((1 << di) - 1)).astype(np.uint32)
+    # ipf == 32 here; leave unused least-significant bits as zero.
+    fields32 = ((uvals & ((1 << di) - 1)) << (ipf - di)).astype(np.uint32)
     return fields32.astype(">u4").tobytes()
 
 
