@@ -102,6 +102,22 @@ class TestPayloadCodec(unittest.TestCase):
         expected = np.array([1.0, -0.5, 0.25], dtype=">f4").tobytes()
         self.assertEqual(payload, expected)
 
+    def test_float32_is_not_clipped(self) -> None:
+        # VITA 49.2 Rule 6.1.1.4-13: IEEE floats have the full IEEE 754 range.
+        for sample_type in (SampleType.REAL, SampleType.COMPLEX_CARTESIAN):
+            pf = _make_pf(
+                sample_type=sample_type,
+                data_item_format=DataItemFormat.IEEE754_SINGLE,
+                item_packing_field_size_bits=32,
+                data_item_size_bits=32,
+            )
+            if sample_type == SampleType.REAL:
+                samples = np.array([28.5, -1.5, 1e6, -3.25e-3], dtype=np.float32)
+            else:
+                samples = np.array([28.5 - 1.5j, 1e6 + 2.0j], dtype=np.complex64)
+            decoded = payload_as_numpy(payload_from_numpy(samples, pf), pf)
+            np.testing.assert_array_equal(decoded, samples)
+
     def test_real_fixed_point_view(self) -> None:
         pf = _make_pf(
             sample_type=SampleType.REAL,

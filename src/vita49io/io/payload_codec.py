@@ -435,7 +435,9 @@ def payload_from_numpy(
     Notes:
         - Input samples are converted to float32 internally before encoding.
         - For IEEE754 single, inputs (including float16/int16) are cast to float32
-          and encoded as big-endian 32-bit floats.
+          and encoded as big-endian 32-bit floats without clipping: VITA 49.2
+          Rule 6.1.1.4-13 gives IEEE floats the full IEEE 754 range (1.0 is the
+          Unit-Scale Sinusoid of §9.5.9, a reference level, not a limit).
         - For fixed-point formats, inputs are scaled, clipped, and rounded to the
           target bit width before packing.
     """
@@ -465,8 +467,7 @@ def payload_from_numpy(
     # Fast path: 32-bit fields
     if ipf == 32 and di == 32:
         if fmt == DataItemFormat.IEEE754_SINGLE:
-            vals_c = np.clip(vals, -1.0, 1.0)
-            return vals_c.astype(">f4").tobytes()
+            return vals.astype(">f4").tobytes()
         if fmt == DataItemFormat.SIGNED_FIXED_POINT:
             # Perform arithmetic in float64 to reduce rounding artifacts
             scale = float(1 << 31)
