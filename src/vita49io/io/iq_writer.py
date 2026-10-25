@@ -27,7 +27,7 @@ from ..protocol.cif0 import (
     DataItemFormat,
 )
 from .payload_codec import payload_from_numpy
-from .time_utils import epoch_time_to_vita_timestamp
+from .time_utils import _as_fraction, epoch_time_to_vita_timestamp
 
 
 def _now_epoch_s() -> float:
@@ -225,7 +225,8 @@ class IQStreamWriter:
             >>> isinstance(writer.current_time(), tuple)
             True
         """
-        t = self.start_time_epoch_s + (self._samples_emitted / float(self.sample_rate_hz))  # type: ignore[operator]
+        # Exact: a float sum near today's epoch would round each packet time to ~238 ns.
+        t = _as_fraction(self.start_time_epoch_s) + _as_fraction(self._samples_emitted) / _as_fraction(self.sample_rate_hz)  # type: ignore[arg-type]
         return epoch_time_to_vita_timestamp(
             t,
             tsi=self.tsi,

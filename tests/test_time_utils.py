@@ -190,6 +190,51 @@ class TestTimeUtils(unittest.TestCase):
         writer.advance_samples(250)
         self.assertEqual(writer.current_time(), (1_700_000_000, 250_000_000_000))
 
+    def test_iq_writer_packet_times_are_exact(self) -> None:
+        # A float epoch near 1.7e9 s resolves only ~238 ns; the cursor must not drift or jitter.
+        from vita49io.io.iq_writer import IQStreamWriter
+
+        writer = IQStreamWriter(stream_id=1, sample_rate_hz=48_000.0, start_time_epoch_s=1_700_000_000.0)
+        for k in range(1, 200):
+            writer.advance_samples(1000)
+            sec, ps = writer.current_time()
+            total_ps = (sec - 1_700_000_000) * 10**12 + ps
+            self.assertEqual(total_ps, (k * 1000 * 10**12 + 24_000) // 48_000)
+
+    def test_fraction_epoch_keeps_picoseconds(self) -> None:
+        from fractions import Fraction
+
+        t = Fraction(1_700_000_000) + Fraction(123_456_789_012, 10**12)
+        self.assertEqual(
+            epoch_time_to_vita_timestamp(t, tsi=TSI.UTC, tsf=TSF.FRACTIONAL),
+            (1_700_000_000, 123_456_789_012),
+        )
+        self.assertEqual(
+            epoch_time_to_vita_timestamp(
+                t, tsi=TSI.UTC, tsf=TSF.SAMPLE_COUNT, sample_count_rate_hz=1e9
+            ),
+            (1_700_000_000, 123_456_789),
+        )
+
+    def test_numpy_scalar_inputs(self) -> None:
+        import numpy as np
+
+        from vita49io.io.iq_writer import IQStreamWriter
+
+        result = epoch_time_to_vita_timestamp(np.int64(1_700_000_000), tsi=TSI.UTC, tsf=TSF.FRACTIONAL)
+        self.assertEqual(result, (1_700_000_000, 0))
+        self.assertIs(type(result[0]), int)
+        self.assertEqual(
+            epoch_time_to_vita_timestamp(np.float32(0.5), tsi=TSI.UTC, tsf=TSF.FRACTIONAL),
+            (0, 500_000_000_000),
+        )
+
+        writer = IQStreamWriter(
+            stream_id=1, sample_rate_hz=np.float32(1000.0), start_time_epoch_s=np.int64(1_700_000_000)
+        )
+        writer.advance_samples(250)
+        self.assertEqual(writer.current_time(), (1_700_000_000, 250_000_000_000))
+
 
 if __name__ == "__main__":
     unittest.main()

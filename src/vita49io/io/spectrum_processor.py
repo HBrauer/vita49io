@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+from fractions import Fraction
 from typing import Deque, Iterable
 
 import numpy as np
@@ -455,7 +456,7 @@ class SpectrumStreamProcessor:
         integer_seconds = None
         fractional_seconds = None
         if self._time_base_epoch_s is not None:
-            t_epoch = self._time_base_epoch_s + float(frame.timestamp)
+            t_epoch = Fraction(self._time_base_epoch_s) + Fraction(float(frame.timestamp))
             integer_seconds, fractional_seconds = epoch_time_to_vita_timestamp(
                 t_epoch,
                 tsi=self._tsi,

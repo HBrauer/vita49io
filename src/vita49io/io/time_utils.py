@@ -15,6 +15,10 @@ All `TSI` and `TSF` modes are supported. Some modes require extra context:
 `TSF.FRACTIONAL` is the VITA 49 Real-Time timestamp: the fractional field
 counts picoseconds past the integer second (0..999,999,999,999).
 
+Encoding is exact for the value it is given: a `fractions.Fraction` epoch
+keeps every picosecond, while a float near today's epoch (~1.7e9 s) only
+resolves about 238 ns.
+
 Examples:
     >>> from vita49io.io.time_utils import epoch_time_to_vita_timestamp
     >>> from vita49io.protocol.enums import TSI, TSF
@@ -28,7 +32,9 @@ Examples:
 from __future__ import annotations
 
 import math
-from typing import Protocol
+import numbers
+from fractions import Fraction
+from typing import Protocol, Union
 
 from ..protocol.enums import TSI, TSF
 
@@ -36,6 +42,8 @@ _U32_MAX = (1 << 32) - 1
 _U64_MAX = (1 << 64) - 1
 _PICOSECONDS_PER_SECOND = 10**12
 _GPS_EPOCH_UNIX_S = 315964800.0  # 1980-01-06T00:00:00Z in POSIX seconds.
+
+EpochTime = Union[float, int, Fraction]
 
 
 class _HeaderTimestampLike(Protocol):
@@ -71,27 +79,38 @@ def _require_positive(value: float | None, name: str) -> float:
     return float(value)
 
 
-def _round_half_up(value: float) -> int:
-    return int(math.floor(value + 0.5))
+def _as_fraction(value: EpochTime) -> Fraction:
+    # Fraction() rejects numpy scalars before Python 3.14; go through int/float like the old float() path.
+    if isinstance(value, Fraction):
+        return value
+    if isinstance(value, numbers.Integral):
+        return Fraction(int(value))
+    return Fraction(float(value))
+
+
+def _round_half_up(value: Fraction) -> int:
+    return math.floor(value + Fraction(1, 2))
 
 
 def _epoch_to_tsi_seconds(
-    epoch_time_s: float,
+    epoch_time_s: EpochTime,
     *,
     tsi: TSI,
     gps_utc_offset_s: int | None,
     other_epoch_s: float | None,
-) -> float:
+) -> Fraction:
+    # Exact rational arithmetic: Fraction(float) is the float's exact value.
+    t = _as_fraction(epoch_time_s)
     if tsi in (TSI.UTC, TSI.NONE):
-        return float(epoch_time_s)
+        return t
     if tsi == TSI.GPS:
         if gps_utc_offset_s is None:
             raise ValueError("gps_utc_offset_s is required when tsi=TSI.GPS")
-        return float(epoch_time_s) - _GPS_EPOCH_UNIX_S + float(gps_utc_offset_s)
+        return t - Fraction(_GPS_EPOCH_UNIX_S) + int(gps_utc_offset_s)
     if tsi == TSI.OTHER:
         if other_epoch_s is None:
             raise ValueError("other_epoch_s is required when tsi=TSI.OTHER")
-        return float(epoch_time_s) - float(other_epoch_s)
+        return t - _as_fraction(other_epoch_s)
     raise ValueError(f"Unsupported TSI mode: {tsi!r}")
 
 
@@ -115,17 +134,17 @@ def _tsi_seconds_to_epoch(
     raise ValueError(f"Unsupported TSI mode: {tsi!r}")
 
 
-def _encode_counter(offset_s: float, *, rate_hz: float, rate_name: str) -> int:
-    if offset_s < 0.0:
+def _encode_counter(offset_s: Fraction, *, rate_hz: float, rate_name: str) -> int:
+    if offset_s < 0:
         raise ValueError(f"{rate_name} conversion produced a negative offset; check reference values")
-    ticks = _round_half_up(offset_s * rate_hz)
+    ticks = _round_half_up(offset_s * Fraction(rate_hz))
     if ticks < 0 or ticks > _U64_MAX:
         raise ValueError(f"Converted {rate_name} counter is out of 64-bit unsigned range")
     return int(ticks)
 
 
 def epoch_time_to_vita_timestamp(
-    epoch_time_s: float,
+    epoch_time_s: EpochTime,
     *,
     tsi: TSI,
     tsf: TSF,
@@ -138,7 +157,8 @@ def epoch_time_to_vita_timestamp(
     """Convert POSIX epoch seconds into VITA integer/fractional timestamp fields.
 
     Args:
-        epoch_time_s (float): POSIX epoch seconds (same basis as `time.time()`).
+        epoch_time_s (float | int | Fraction): POSIX epoch seconds (same basis as
+            `time.time()`). Pass a `Fraction` for sub-microsecond precision.
         tsi (TSI): Integer timestamp interpretation mode.
         tsf (TSF): Fractional timestamp interpretation mode.
         gps_utc_offset_s (int | None): GPS-UTC leap second offset when `tsi=TSI.GPS`.
@@ -176,19 +196,19 @@ def epoch_time_to_vita_timestamp(
             return None, None
         if tsi_none_reference_s is None:
             raise ValueError("tsi_none_reference_s is required when tsi=TSI.NONE and tsf!=TSF.NONE")
-        base_seconds = float(tsi_none_reference_s)
+        base_seconds = _as_fraction(tsi_none_reference_s)
     else:
-        integer_seconds = int(math.floor(tsi_seconds))
+        integer_seconds = math.floor(tsi_seconds)
         if integer_seconds < 0 or integer_seconds > _U32_MAX:
             raise ValueError("Converted integer_seconds is out of 32-bit unsigned range")
-        base_seconds = float(integer_seconds)
+        base_seconds = Fraction(integer_seconds)
 
     if tsf == TSF.NONE:
         return integer_seconds, None
 
     offset_s = tsi_seconds - base_seconds
     if tsf == TSF.FRACTIONAL:
-        if not (0.0 <= offset_s < 1.0 + 1e-15):
+        if not (0 <= offset_s < 1 + Fraction(1, 10**15)):
             raise ValueError(
                 "TSF.FRACTIONAL requires an offset in [0, 1). For tsi=TSI.NONE, "
                 "provide tsi_none_reference_s close to the target time."
@@ -205,7 +225,7 @@ def epoch_time_to_vita_timestamp(
                 raise ValueError("Integer second carry would overflow 32-bit range")
             integer_seconds += 1
             frac = 0
-        return integer_seconds, int(frac)
+        return integer_seconds, frac
 
     if tsf == TSF.SAMPLE_COUNT:
         rate_hz = _require_positive(sample_count_rate_hz, "sample_count_rate_hz")
@@ -374,4 +394,5 @@ __all__ = [
     "vita_timestamp_to_epoch_time",
     "packet_vita_time_to_epoch_time",
     "PacketTimestampLike",
+    "EpochTime",
 ]

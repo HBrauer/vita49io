@@ -91,6 +91,7 @@ def main(argv: list[str]) -> int:
     _ensure_src_on_path()
 
     from vita49io import ContextPacket, DataPacket, PacketType, TSI, TSF, CIF0Fields
+    from vita49io.io.time_utils import epoch_time_to_vita_timestamp
     from vita49io.protocol.core import Header
     from vita49io.io.payload_codec import payload_from_numpy
 
@@ -176,8 +177,9 @@ def main(argv: list[str]) -> int:
     for frame_idx in range(num_frames):
         sim_time += frame_period_s
         frame_time = start_epoch_s + frame_idx * frame_period_s
-        integer_seconds = int(frame_time)
-        fractional_seconds = min(round((frame_time - integer_seconds) * 1e12), 10**12 - 1)  # picoseconds
+        integer_seconds, fractional_seconds = epoch_time_to_vita_timestamp(
+            frame_time, tsi=TSI.UTC, tsf=TSF.FRACTIONAL
+        )
 
         data_header = Header(
             packet_type=PacketType.IF_DATA_WITH_STREAM_ID,
