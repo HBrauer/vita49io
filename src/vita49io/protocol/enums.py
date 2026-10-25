@@ -61,8 +61,8 @@ class TSF(IntEnum):
 
     Attributes:
         NONE (int): No fractional timestamp.
-        SAMPLE_COUNT (int): Sample count or real-time fractional seconds.
-        FRACTIONAL (int): Fractional seconds.
+        SAMPLE_COUNT (int): Sample count timestamp.
+        FRACTIONAL (int): Real-time timestamp in picoseconds (0..10**12 - 1).
         FREE_RUNNING (int): Free-running counter.
 
     Examples:
@@ -72,7 +72,7 @@ class TSF(IntEnum):
     """
 
     NONE = 0
-    SAMPLE_COUNT = 1  # Or Real-time fractional seconds depending on type
-    FRACTIONAL = 2
+    SAMPLE_COUNT = 1
+    FRACTIONAL = 2  # Real-time (picoseconds)
     FREE_RUNNING = 3
 

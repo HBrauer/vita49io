@@ -29,12 +29,15 @@ def _resolve_center_hz(cif0) -> Optional[float]:
     return float(center) if center is not None else None
 
 
-def _packet_time_s(integer_seconds: int | None, fractional_seconds: int | None) -> Optional[float]:
-    if integer_seconds is None and fractional_seconds is None:
+def _packet_time_s(pkt) -> Optional[float]:
+    from vita49io.protocol.enums import TSF
+
+    if pkt.integer_seconds is None:
         return None
-    sec = float(integer_seconds or 0)
-    frac = float(fractional_seconds or 0)
-    return sec + (frac / float(1 << 64))
+    sec = float(pkt.integer_seconds)
+    if pkt.header.tsf == TSF.FRACTIONAL and pkt.fractional_seconds is not None:
+        return sec + pkt.fractional_seconds / 1e12  # picoseconds
+    return sec
 
 
 def _read_first_context_info(path: str) -> Tuple[Optional[float], Optional[float]]:
@@ -136,7 +139,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             payload = pkt.payload
             payload_bytes = payload.tobytes() if isinstance(payload, memoryview) else payload
             spectrum = np.frombuffer(payload_bytes, dtype=">f4")
-            timestamp = _packet_time_s(pkt.integer_seconds, pkt.fractional_seconds)
+            timestamp = _packet_time_s(pkt)
 
             print((spectrum, sample_rate_hz, center_hz, timestamp))
 

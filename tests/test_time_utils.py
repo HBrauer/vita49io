@@ -152,6 +152,44 @@ class TestTimeUtils(unittest.TestCase):
         assert t_from_pkt is not None
         self.assertLessEqual(abs(t_from_pkt - t_epoch_s), 2e-6)
 
+    def test_real_time_fraction_is_picoseconds(self) -> None:
+        self.assertEqual(
+            epoch_time_to_vita_timestamp(1_700_000_000.5, tsi=TSI.UTC, tsf=TSF.FRACTIONAL),
+            (1_700_000_000, 500_000_000_000),
+        )
+        self.assertEqual(
+            vita_timestamp_to_epoch_time(
+                tsi=TSI.UTC,
+                tsf=TSF.FRACTIONAL,
+                integer_seconds=1_700_000_000,
+                fractional_seconds=250_000_000_000,
+            ),
+            1_700_000_000.25,
+        )
+
+    def test_real_time_fraction_carries_into_integer_seconds(self) -> None:
+        self.assertEqual(
+            epoch_time_to_vita_timestamp(0.9999999999999, tsi=TSI.UTC, tsf=TSF.FRACTIONAL),
+            (1, 0),
+        )
+
+    def test_real_time_fraction_out_of_range_raises(self) -> None:
+        with self.assertRaisesRegex(ValueError, "picoseconds"):
+            vita_timestamp_to_epoch_time(
+                tsi=TSI.UTC,
+                tsf=TSF.FRACTIONAL,
+                integer_seconds=1,
+                fractional_seconds=10**12,
+            )
+
+    def test_iq_writer_advances_picoseconds(self) -> None:
+        from vita49io.io.iq_writer import IQStreamWriter
+
+        writer = IQStreamWriter(stream_id=1, sample_rate_hz=1000.0, start_time_epoch_s=1_700_000_000.0)
+        self.assertEqual(writer.current_time(), (1_700_000_000, 0))
+        writer.advance_samples(250)
+        self.assertEqual(writer.current_time(), (1_700_000_000, 250_000_000_000))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -177,7 +177,7 @@ def main(argv: list[str]) -> int:
         sim_time += frame_period_s
         frame_time = start_epoch_s + frame_idx * frame_period_s
         integer_seconds = int(frame_time)
-        fractional_seconds = int((frame_time - integer_seconds) * (1 << 64))
+        fractional_seconds = min(round((frame_time - integer_seconds) * 1e12), 10**12 - 1)  # picoseconds
 
         data_header = Header(
             packet_type=PacketType.IF_DATA_WITH_STREAM_ID,

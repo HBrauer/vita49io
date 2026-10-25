@@ -267,12 +267,30 @@ def _load_toml_module():
             ) from exc
 
 
-def _packet_time_s(integer_seconds: Optional[int], fractional_seconds: Optional[int]) -> Optional[float]:
-    if integer_seconds is None and fractional_seconds is None:
+def _packet_time_s(
+    tsi: int,
+    tsf: int,
+    integer_seconds: Optional[int],
+    fractional_seconds: Optional[int],
+    sample_rate_hz: Optional[float],
+) -> Optional[float]:
+    # Without integer seconds the fractional field is not an absolute time.
+    if tsi == TSI.NONE or integer_seconds is None:
         return None
-    sec = float(integer_seconds or 0)
-    frac = float(fractional_seconds or 0)
-    return sec + (frac / float(1 << 64))
+    sec = float(integer_seconds)
+    if fractional_seconds is None:
+        return sec
+    if tsf == TSF.FRACTIONAL:
+        if fractional_seconds >= 10**12:
+            raise ValueError(
+                f"Real-time timestamp {fractional_seconds} exceeds 999999999999 picoseconds; "
+                "files written by vita49io <= 0.1.9 stored a 2**64 fraction instead"
+            )
+        return sec + fractional_seconds / 1e12
+    if tsf == TSF.SAMPLE_COUNT and sample_rate_hz:
+        return sec + fractional_seconds / float(sample_rate_hz)
+    # A free-running count has no defined relation to seconds.
+    return sec
 
 
 def _payload_format_matches(
@@ -885,11 +903,6 @@ def convert_v49_ddc(
 
             if isinstance(pkt, ContextPacket):
                 context_packets_seen += 1
-                context_time_s = _packet_time_s(pkt.integer_seconds, pkt.fractional_seconds)
-                if first_context_time_s is None:
-                    first_context_time_s = context_time_s
-                if next_packet_time_s is None and context_time_s is not None:
-                    next_packet_time_s = context_time_s
                 if pkt.cif0 is not None:
                     cif0 = pkt.cif0
                     if input_payload_format is None and cif0.payload_format is not None:
@@ -919,6 +932,17 @@ def convert_v49_ddc(
                         input_device_identifier = cif0.device_identifier
                     if input_state_event_indicators is None and cif0.state_event_indicators is not None:
                         input_state_event_indicators = cif0.state_event_indicators
+                context_time_s = _packet_time_s(
+                    pkt.header.tsi,
+                    pkt.header.tsf,
+                    pkt.integer_seconds,
+                    pkt.fractional_seconds,
+                    input_sample_rate_hz,
+                )
+                if first_context_time_s is None:
+                    first_context_time_s = context_time_s
+                if next_packet_time_s is None and context_time_s is not None:
+                    next_packet_time_s = context_time_s
                 if input_stream_id is None and pkt.stream_id is not None:
                     input_stream_id = pkt.stream_id
                 input_context_tsm = bool(pkt.header.indicators_24)
@@ -935,7 +959,13 @@ def convert_v49_ddc(
                         "Supported: F32_IQ, S32_IQ, S24_IQ, S16_IQ"
                     )
 
-                packet_start_time_s = _packet_time_s(pkt.integer_seconds, pkt.fractional_seconds)
+                packet_start_time_s = _packet_time_s(
+                    pkt.tsi,
+                    pkt.tsf,
+                    pkt.integer_seconds,
+                    pkt.fractional_seconds,
+                    input_sample_rate_hz,
+                )
                 if packet_start_time_s is None and time_window_enabled:
                     packet_start_time_s = next_packet_time_s
                     if packet_start_time_s is None:

@@ -12,6 +12,9 @@ All `TSI` and `TSF` modes are supported. Some modes require extra context:
 - `TSF.SAMPLE_COUNT`: requires `sample_count_rate_hz`.
 - `TSF.FREE_RUNNING`: requires `free_running_rate_hz`.
 
+`TSF.FRACTIONAL` is the VITA 49 Real-Time timestamp: the fractional field
+counts picoseconds past the integer second (0..999,999,999,999).
+
 Examples:
     >>> from vita49io.io.time_utils import epoch_time_to_vita_timestamp
     >>> from vita49io.protocol.enums import TSI, TSF
@@ -31,7 +34,7 @@ from ..protocol.enums import TSI, TSF
 
 _U32_MAX = (1 << 32) - 1
 _U64_MAX = (1 << 64) - 1
-_FRAC_SCALE = float(1 << 64)
+_PICOSECONDS_PER_SECOND = 10**12
 _GPS_EPOCH_UNIX_S = 315964800.0  # 1980-01-06T00:00:00Z in POSIX seconds.
 
 
@@ -190,8 +193,8 @@ def epoch_time_to_vita_timestamp(
                 "TSF.FRACTIONAL requires an offset in [0, 1). For tsi=TSI.NONE, "
                 "provide tsi_none_reference_s close to the target time."
             )
-        frac = _round_half_up(offset_s * _FRAC_SCALE)
-        if frac >= (1 << 64):
+        frac = _round_half_up(offset_s * _PICOSECONDS_PER_SECOND)
+        if frac >= _PICOSECONDS_PER_SECOND:
             # Rounded up to exactly 1 second.
             if integer_seconds is None:
                 raise ValueError(
@@ -289,7 +292,9 @@ def vita_timestamp_to_epoch_time(
             raise ValueError("fractional_seconds must be in 0..0xFFFFFFFFFFFFFFFF")
 
         if tsf == TSF.FRACTIONAL:
-            offset_s = float(fractional_seconds) / _FRAC_SCALE
+            if fractional_seconds >= _PICOSECONDS_PER_SECOND:
+                raise ValueError("TSF.FRACTIONAL picoseconds must be in 0..999999999999")
+            offset_s = fractional_seconds / _PICOSECONDS_PER_SECOND
         elif tsf == TSF.SAMPLE_COUNT:
             rate_hz = _require_positive(sample_count_rate_hz, "sample_count_rate_hz")
             offset_s = float(fractional_seconds) / rate_hz

@@ -27,13 +27,20 @@ def read_packets_with_iq(path: str):
     from vita49io.protocol.cif0 import PayloadFormat
     from vita49io.io.packet_reader import PacketReader
     from vita49io.io.payload_codec import payload_as_numpy
+    from vita49io.protocol.enums import TSF
 
-    def _pkt_time_s(integer_seconds: Optional[int], fractional_seconds: Optional[int]) -> Optional[float]:
-        if integer_seconds is None and fractional_seconds is None:
+    def _pkt_time_s(pkt, sample_rate_hz: Optional[float]) -> Optional[float]:
+        if pkt.integer_seconds is None:
             return None
-        sec = float(integer_seconds or 0)
-        frac = float(fractional_seconds or 0)
-        return sec + (frac / float(1 << 64))
+        sec = float(pkt.integer_seconds)
+        frac = pkt.fractional_seconds
+        if frac is None:
+            return sec
+        if pkt.header.tsf == TSF.FRACTIONAL:
+            return sec + frac / 1e12  # picoseconds
+        if pkt.header.tsf == TSF.SAMPLE_COUNT and sample_rate_hz:
+            return sec + frac / sample_rate_hz
+        return sec
 
     class IQPacketReader:
         def __init__(self, file_path: str) -> None:
@@ -67,7 +74,7 @@ def read_packets_with_iq(path: str):
                                     pkt.cif0.rf_reference_frequency_hz
                                 )
                         # Track timestamps from context packets if present
-                        t_ctx = _pkt_time_s(pkt.integer_seconds, pkt.fractional_seconds)
+                        t_ctx = _pkt_time_s(pkt, self.first_sample_rate_hz)
                         if t_ctx is not None:
                             if self.first_timestamp_s is None:
                                 self.first_timestamp_s = t_ctx
@@ -78,7 +85,7 @@ def read_packets_with_iq(path: str):
                         payload = pkt.payload
                         payload_bytes = payload.tobytes() if isinstance(payload, memoryview) else payload
                         iq = payload_as_numpy(payload_bytes, self._last_payload_format)
-                        t_s = _pkt_time_s(pkt.integer_seconds, pkt.fractional_seconds)
+                        t_s = _pkt_time_s(pkt, self.first_sample_rate_hz)
                         if t_s is not None:
                             if self.first_timestamp_s is None:
                                 self.first_timestamp_s = t_s
