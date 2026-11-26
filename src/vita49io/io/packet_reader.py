@@ -1,4 +1,13 @@
-"""Read VITA 49 packets from any stream supporting ``read()``."""
+"""Read VITA 49 packets from any stream supporting ``read()``.
+
+Streams may contain bare VRT packets (VITA 49.0 / 49.2) or VRT packets wrapped
+in VITA 49.1 VRL (VITA Radio Link Layer) frames. VRL framing is detected per
+packet boundary and stripped transparently: the frame header (``VRLP`` frame
+alignment word + frame count/size word) and the frame trailer (CRC-32 or the
+``VEND`` no-CRC marker) are consumed and discarded, and the contained VRT
+packets are returned exactly as if they had been stored without framing. The
+CRC is not validated.
+"""
 
 from __future__ import annotations
 
@@ -23,6 +32,13 @@ _DATA_PACKET_TYPE_WITH_STREAM_VALUES = (
     int(PacketType.IF_DATA_WITH_STREAM_ID),
     int(PacketType.EXTENSION_DATA_WITH_STREAM_ID),
 )
+
+# VITA 49.1 VRL frame constants.
+VRL_FRAME_ALIGNMENT_WORD = 0x56524C50  # "VRLP"
+VRL_NO_CRC_TRAILER = 0x56454E44  # "VEND"
+_VRL_FAW_BYTES = b"VRLP"
+_VRL_FRAME_SIZE_MASK = 0x000FFFFF
+_VRL_FRAME_OVERHEAD_WORDS = 3  # 2 header words + 1 trailer word
 
 _HDR_C_MASK = 0x08000000
 _HDR_PSI_MASK = 0x07000000
@@ -61,23 +77,68 @@ class PacketReader:
 
     def __init__(self, stream: Readable) -> None:
         self._stream = stream
+        # Words left in the current VITA 49.1 VRL frame (packets + trailer).
+        # 0 means "not inside a VRL frame".
+        self._vrl_words_left = 0
+        self.vrl_frame_count: int | None = None
+        """Frame count of the most recent VRL frame, or None if none seen."""
+
+    def _read_header_word(self) -> tuple[bytes, int, int]:
+        """Read the next VRT header word, stripping any VITA 49.1 VRL framing.
+
+        Returns (w0_buf, total_words). At EOF on a packet/frame boundary,
+        returns (b"", 0).
+        """
+        stream = self._stream
+        while True:
+            if self._vrl_words_left == 1:
+                # Only the frame trailer (CRC-32 or "VEND") remains; drop it.
+                _read_exact(stream, 4)
+                self._vrl_words_left = 0
+
+            w0_buf = _read_exact(stream, 4, allow_eof=True)
+            if not w0_buf:
+                if self._vrl_words_left:
+                    raise ValueError("Truncated VRL frame: EOF inside frame")
+                return b"", 0
+
+            if self._vrl_words_left == 0 and w0_buf == _VRL_FAW_BYTES:
+                frame_word = WORD.unpack(_read_exact(stream, 4))[0]
+                frame_words = frame_word & _VRL_FRAME_SIZE_MASK
+                if frame_words < _VRL_FRAME_OVERHEAD_WORDS:
+                    raise ValueError(f"Invalid VRL frame size (words): {frame_words}")
+                self.vrl_frame_count = (frame_word >> 20) & 0xFFF
+                # Remaining = contained packets + trailer word.
+                self._vrl_words_left = frame_words - 2
+                continue
+
+            w0 = WORD.unpack(w0_buf)[0]
+            total_words = w0 & 0xFFFF
+            if total_words <= 0:
+                raise ValueError(f"Invalid packet size (words): {total_words}")
+            if self._vrl_words_left:
+                if total_words > self._vrl_words_left - 1:
+                    raise ValueError(
+                        "VRT packet exceeds enclosing VRL frame: "
+                        f"{total_words} words, {self._vrl_words_left - 1} left"
+                    )
+                self._vrl_words_left -= total_words
+            return w0_buf, total_words
+
+    def _read_packet_header(self) -> tuple[Header | None, bytes, int]:
+        """Read the next packet header, returning (header, w0_buf, total_bytes)."""
+        w0_buf, total_words = self._read_header_word()
+        if not w0_buf:
+            return None, b"", 0
+        header = Header.parse(int.from_bytes(w0_buf, byteorder="big"))
+        return header, w0_buf, total_words * 4
 
     def read_packet(self) -> ContextPacket | DataPacket | None:
         """Read and parse the next packet from the stream."""
-        w0_buf = _read_exact(self._stream, 4, allow_eof=True)
-        if not w0_buf:
+        header, w0_buf, total_bytes = self._read_packet_header()
+        if header is None:
             return None
 
-        if len(w0_buf) != 4:
-            raise ValueError(f"Truncated header: expected 4 bytes, got {len(w0_buf)}")
-
-        w0 = int.from_bytes(w0_buf, byteorder="big")
-        header = Header.parse(w0)
-        total_words = header.packet_size
-        if total_words <= 0:
-            raise ValueError(f"Invalid packet size (words): {total_words}")
-
-        total_bytes = total_words * 4
         packet_bytes = bytearray(total_bytes)
         packet_bytes[:4] = w0_buf
         _read_exact_into(self._stream, memoryview(packet_bytes)[4:])
@@ -94,17 +155,12 @@ class PacketReader:
 
         Returns ContextPacket for context packets and RawDataPacket for data packets.
         """
-        w0_buf = _read_exact(self._stream, 4, allow_eof=True)
+        w0_buf, total_words = self._read_header_word()
         if not w0_buf:
             return None
-        if len(w0_buf) != 4:
-            raise ValueError(f"Truncated header: expected 4 bytes, got {len(w0_buf)}")
 
         w0 = WORD.unpack_from(w0_buf, 0)[0]
         packet_type = (w0 >> 28) & 0xF
-        total_words = w0 & 0xFFFF
-        if total_words <= 0:
-            raise ValueError(f"Invalid packet size (words): {total_words}")
 
         total_bytes = total_words * 4
         packet_bytes = bytearray(total_bytes)
@@ -126,7 +182,7 @@ class PacketReader:
 
         skipped = 0
         while skipped < n:
-            header, w0_buf, total_bytes = _read_packet_header(self._stream)
+            header, w0_buf, total_bytes = self._read_packet_header()
             if header is None:
                 break
             _skip_exact(self._stream, total_bytes - len(w0_buf))
@@ -140,7 +196,7 @@ class PacketReader:
 
         skipped = 0
         while skipped < n:
-            header, w0_buf, total_bytes = _read_packet_header(self._stream)
+            header, w0_buf, total_bytes = self._read_packet_header()
             if header is None:
                 break
             _skip_exact(self._stream, total_bytes - len(w0_buf))
@@ -155,7 +211,7 @@ class PacketReader:
 
         skipped = 0
         while skipped < n:
-            header, w0_buf, total_bytes = _read_packet_header(self._stream)
+            header, w0_buf, total_bytes = self._read_packet_header()
             if header is None:
                 break
             _skip_exact(self._stream, total_bytes - len(w0_buf))
@@ -166,7 +222,7 @@ class PacketReader:
     def skip_until_next_context_packet(self) -> ContextPacket | None:
         """Skip packets until the next context packet, returning it if found."""
         while True:
-            header, w0_buf, total_bytes = _read_packet_header(self._stream)
+            header, w0_buf, total_bytes = self._read_packet_header()
             if header is None:
                 return None
             if header.packet_type == PacketType.CONTEXT_PACKET:
@@ -179,7 +235,7 @@ class PacketReader:
     def skip_until_next_data_packet(self) -> DataPacket | None:
         """Skip packets until the next data packet, returning it if found."""
         while True:
-            header, w0_buf, total_bytes = _read_packet_header(self._stream)
+            header, w0_buf, total_bytes = self._read_packet_header()
             if header is None:
                 return None
             if header.packet_type in _DATA_PACKET_TYPES:
@@ -205,22 +261,6 @@ def _read_exact(stream: Readable, n: int, *, allow_eof: bool = False) -> bytes:
     if allow_eof and nread == 0:
         return b""
     return bytes(buf)
-
-
-def _read_packet_header(stream: Readable) -> tuple[Header | None, bytes, int]:
-    """Read the next packet header, returning (header, w0_buf, total_bytes)."""
-    w0_buf = _read_exact(stream, 4, allow_eof=True)
-    if not w0_buf:
-        return None, b"", 0
-    if len(w0_buf) != 4:
-        raise ValueError(f"Truncated header: expected 4 bytes, got {len(w0_buf)}")
-
-    w0 = int.from_bytes(w0_buf, byteorder="big")
-    header = Header.parse(w0)
-    total_words = header.packet_size
-    if total_words <= 0:
-        raise ValueError(f"Invalid packet size (words): {total_words}")
-    return header, w0_buf, total_words * 4
 
 
 def _parse_raw_data_packet(mv: memoryview, w0: int, packet_type: int) -> RawDataPacket:

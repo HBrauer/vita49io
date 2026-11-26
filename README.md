@@ -237,6 +237,19 @@ with open(path, "rb") as f:
 
 See: `src/vita49io/scripts/read_v49_file.py` or run `vita-read-v49`.
 
+### VITA 49.1 (VRL) framed streams
+
+`PacketReader` also reads streams wrapped in VITA 49.1 VRL (VITA Radio Link Layer) frames. Frames are detected automatically and stripped: the `VRLP` frame header and the CRC/`VEND` trailer are discarded and the VRT packets inside are returned as if the stream had no framing. Framed and unframed data may be mixed in one stream. The frame CRC is not checked; the most recent frame count is available as `reader.vrl_frame_count`. The writer still produces unframed VRT packets, and the hand-rolled parser shown above does not handle VRL frames.
+
+```python
+from vita49io.io.packet_reader import PacketReader
+
+with open("capture_vrl.v49", "rb") as f:
+    reader = PacketReader(f)
+    while (pkt := reader.read_packet()) is not None:
+        handle(pkt)
+```
+
 Write Data Into A File
 ---------------------------
 

@@ -1,5 +1,7 @@
 import io
+import struct
 import unittest
+import zlib
 
 from vita49io import CIF0Fields, ContextPacket, DataPacket, PacketType, TSI, TSF
 from vita49io.io.packet_reader import PacketReader, RawDataPacket
@@ -26,6 +28,15 @@ def _context_packet(stream_id: int) -> bytes:
         cif0=CIF0Fields(),
     )
     return pkt.to_bytes()
+
+
+def _vrl_frame(packets: bytes, frame_count: int = 0, crc: bool = False) -> bytes:
+    """Wrap VRT packets in a VITA 49.1 VRL frame."""
+    assert len(packets) % 4 == 0
+    frame_words = len(packets) // 4 + 3
+    body = b"VRLP" + struct.pack(">I", ((frame_count & 0xFFF) << 20) | frame_words) + packets
+    trailer = struct.pack(">I", zlib.crc32(body)) if crc else b"VEND"
+    return body + trailer
 
 
 class TestPacketReader(unittest.TestCase):
@@ -132,3 +143,75 @@ class TestPacketReader(unittest.TestCase):
         next_pkt = reader.read_packet()
         self.assertIsInstance(next_pkt, ContextPacket)
         self.assertEqual(next_pkt.stream_id, 10)
+
+
+class TestPacketReaderVRL(unittest.TestCase):
+    """VITA 49.1 VRL frames are stripped transparently."""
+
+    def _read_all(self, data: bytes, fast: bool = False) -> list:
+        reader = PacketReader(io.BytesIO(data))
+        out = []
+        while True:
+            pkt = reader.read_packet_fast() if fast else reader.read_packet()
+            if pkt is None:
+                return out
+            out.append(pkt)
+
+    def test_single_packet_per_frame(self) -> None:
+        raw = _context_packet(1) + _data_packet(1, payload=b"\x01\x02\x03\x04")
+        framed = _vrl_frame(_context_packet(1), 0) + _vrl_frame(
+            _data_packet(1, payload=b"\x01\x02\x03\x04"), 1, crc=True
+        )
+        plain = self._read_all(raw)
+        vrl = self._read_all(framed)
+        self.assertEqual([p.to_bytes() for p in vrl], [p.to_bytes() for p in plain])
+
+    def test_multiple_packets_per_frame_fast(self) -> None:
+        framed = _vrl_frame(
+            _context_packet(7) + _data_packet(7, payload=b"\xAA\xBB\xCC\xDD") + _data_packet(8)
+        )
+        pkts = self._read_all(framed, fast=True)
+        self.assertEqual(len(pkts), 3)
+        self.assertIsInstance(pkts[0], ContextPacket)
+        self.assertIsInstance(pkts[1], RawDataPacket)
+        self.assertEqual(bytes(pkts[1].payload), b"\xAA\xBB\xCC\xDD")
+        self.assertEqual(pkts[2].stream_id, 8)
+
+    def test_frame_count_exposed(self) -> None:
+        reader = PacketReader(io.BytesIO(_vrl_frame(_data_packet(1), frame_count=0xABC)))
+        self.assertIsNone(reader.vrl_frame_count)
+        reader.read_packet()
+        self.assertEqual(reader.vrl_frame_count, 0xABC)
+
+    def test_empty_frame_and_mixed_unframed(self) -> None:
+        data = _vrl_frame(b"") + _data_packet(1) + _vrl_frame(_data_packet(2))
+        pkts = self._read_all(data)
+        self.assertEqual([p.stream_id for p in pkts], [1, 2])
+
+    def test_skip_methods_across_frames(self) -> None:
+        data = (
+            _vrl_frame(_data_packet(1) + _data_packet(2))
+            + _vrl_frame(_context_packet(3) + _data_packet(4))
+            + _vrl_frame(_context_packet(5))
+        )
+        reader = PacketReader(io.BytesIO(data))
+        self.assertEqual(reader.skip_data_packets(2), 2)
+        ctx = reader.skip_until_next_context_packet()
+        self.assertEqual(ctx.stream_id, 3)
+        self.assertEqual(reader.skip_until_next_data_packet().stream_id, 4)
+        self.assertEqual(reader.skip_packets(5), 1)
+        self.assertIsNone(reader.read_packet())
+
+    def test_packet_larger_than_frame_raises(self) -> None:
+        pkt = _data_packet(1, payload=b"\x00" * 8)
+        frame = bytearray(_vrl_frame(pkt))
+        frame[4:8] = struct.pack(">I", 4)  # claim frame holds only 1 word
+        with self.assertRaises(ValueError):
+            PacketReader(io.BytesIO(bytes(frame))).read_packet()
+
+    def test_truncated_frame_raises(self) -> None:
+        frame = _vrl_frame(_data_packet(1))[:-4]  # drop trailer
+        reader = PacketReader(io.BytesIO(frame))
+        reader.read_packet()
+        with self.assertRaises(ValueError):
+            reader.read_packet()
