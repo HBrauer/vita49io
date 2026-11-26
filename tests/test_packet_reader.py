@@ -50,6 +50,24 @@ class TestPacketReader(unittest.TestCase):
         self.assertEqual(pkt.stream_id, 0x12345678)
         self.assertEqual(bytes(pkt.payload), b"\x11\x22\x33\x44")
 
+    def test_read_packet_fast_class_id_oui(self) -> None:
+        class_id = (0xABCDEF, 0x1234, 0x5678)
+        raw = DataPacket(
+            packet_type=PacketType.IF_DATA_WITH_STREAM_ID,
+            stream_id=1,
+            class_id=class_id,
+            tsi=TSI.NONE,
+            tsf=TSF.NONE,
+            payload=b"\x00\x00\x00\x00",
+            packet_count=0,
+        ).to_bytes()
+        # VITA 49.2 §5.1.3: OUI in bits 23..0 of the first Class ID word.
+        self.assertEqual(raw[8:12], b"\x00\xAB\xCD\xEF")
+        fast = PacketReader(io.BytesIO(raw)).read_packet_fast()
+        full = PacketReader(io.BytesIO(raw)).read_packet()
+        self.assertEqual(fast.class_id, class_id)
+        self.assertEqual(full.class_id, class_id)
+
     def test_read_packet_fast_context_packet(self) -> None:
         stream = io.BytesIO(_context_packet(0xCAFEBABE))
         reader = PacketReader(stream)

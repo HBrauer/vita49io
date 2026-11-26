@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `PacketReader.read_packet_fast()` now decodes the Class ID OUI from bits 23..0 of the first Class ID word, matching `read_packet()`. It previously shifted the word right by 8 and returned a wrong OUI (e.g. `0x00ABCD` instead of `0xABCDEF`); this affected `vita-ddc` and other fast-path readers.
+
 - `PacketReader` now reads VITA 49.1 VRL-framed streams. VRL frame headers (`VRLP` + frame count/size) and trailers (CRC-32 or `VEND`) are detected and stripped transparently, so every reader-based tool (`vita-read`, `vita-ddc`, `vita-waterfall`, `SpectrumStreamProcessor`, examples) accepts VRL captures. The CRC is not validated. Unframed streams are read exactly as before.
 
 - `IQStreamWriter` and `SpectrumStreamProcessor` packet times are now exact. They added the sample offset to a float epoch, which near today's epoch resolves only ~238 ns, so packet spacing jittered by up to that much. `epoch_time_to_vita_timestamp` now computes with exact rationals and also accepts a `fractions.Fraction`.

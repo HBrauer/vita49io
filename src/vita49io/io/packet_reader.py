@@ -293,7 +293,7 @@ def _parse_raw_data_packet(mv: memoryview, w0: int, packet_type: int) -> RawData
         w_a = WORD.unpack_from(mv, idx)[0]
         w_b = WORD.unpack_from(mv, idx + 4)[0]
         idx += 8
-        oui = (w_a >> 8) & 0xFFFFFF
+        oui = w_a & 0xFFFFFF
         information_class = (w_b >> 16) & 0xFFFF
         packet_class = w_b & 0xFFFF
         class_id = (oui, information_class, packet_class)
